@@ -1,0 +1,13 @@
+## Interface: 120100
+## Title: NerdWow
+## Notes: Diário de eventos do personagem para o Nerd-Wow.
+## Author: Greg
+## Version: 0.1.0
+## SavedVariables: NerdWow_Journal
+
+Locales\ptBR.lua
+Journal\Schema.lua
+Journal\Journal.lua
+Integration\Database.lua
+Integration\Wow.lua
+Bootstrap.lua

@@ -9,4 +9,10 @@ addon.database = {
     Bind = function(root)
         NerdWow_Journal = root
     end,
+    ReadSettings = function()
+        return NerdWow_Settings
+    end,
+    BindSettings = function(root)
+        NerdWow_Settings = root
+    end,
 }

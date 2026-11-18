@@ -1,6 +1,8 @@
 local addonName, addon = ...
 local Wow, Text = addon.Wow, addon.Text
 local journal, blockedCode, currentCharacterKey
+local settings, minimap
+local pendingEvents = 0
 local inWorld = false
 local initialized = false
 local warnings = {}
@@ -26,6 +28,9 @@ local function append(kind, key, payload)
     local id, failure = journal.Append(kind, key, timestamp, payload)
     if not id then
         warn(failure)
+    else
+        pendingEvents = math.min(pendingEvents + 1, addon.Schema.MAX_EVENTS)
+        if minimap then minimap.RefreshTooltip() end
     end
     return id
 end
@@ -56,10 +61,33 @@ local function captureLocation()
     append("LOCATION_CHANGED", currentCharacterKey, payload)
 end
 
+local function tooltip()
+    local view = { version = Wow.Version() }
+    if journal then
+        local status = journal.GetStatus()
+        view.totalEvents = status.totalEvents
+        view.pendingEvents = math.min(pendingEvents, status.totalEvents)
+        view.lastTime = status.lastTimestamp and Wow.FormatTime(status.lastTimestamp) or Text.noTime
+    else
+        view.blockedReason = reason(blockedCode or "not_initialized")
+    end
+    return addon.MinimapButton.Tooltip(view, Text)
+end
+
 Wow.RegisterCommand(function(message)
     local argument = (message or ""):match("^%s*(.-)%s*$"):lower()
     if argument == "sincronizar" then
         Wow.RequestSync()
+        return
+    end
+    if argument == "botao" then
+        if not settings then
+            Wow.Print(Text.buttonNotReady)
+            return
+        end
+        local hidden = settings.ToggleHidden()
+        minimap.Refresh()
+        Wow.Print(hidden and Text.buttonHidden or Text.buttonShown)
         return
     end
     if argument ~= "ajuda" and argument ~= "?" then
@@ -82,6 +110,12 @@ Wow.Listen(function(event, loadedName)
             return
         end
         initialized = true
+        local settingsRoot, repaired
+        settings, settingsRoot, repaired = addon.Settings.Open(addon.database.ReadSettings())
+        addon.database.BindSettings(settingsRoot)
+        for _, field in ipairs(repaired) do
+            Wow.Print(string.format(Text.settingsRecovered, Text.settingsFields[field]))
+        end
         local saved = addon.database.Read()
         local root
         local droppedBefore = type(saved) == "table" and saved.droppedEvents or 0
@@ -95,6 +129,8 @@ Wow.Listen(function(event, loadedName)
         else
             Wow.Print(string.format(Text.blocked, reason(blockedCode)))
         end
+        minimap = addon.MinimapUI.Create({ GetSettings = settings.Get, SetAngle = settings.SetAngle,
+            GetTooltip = tooltip, OnClick = Wow.RequestSync })
         return
     end
     if not journal then

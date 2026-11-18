@@ -23,6 +23,8 @@ local function core()
     })
     loadModule("Journal/Schema.lua", namespace, environment)
     loadModule("Journal/Journal.lua", namespace, environment)
+    loadModule("Configuration/Settings.lua", namespace, environment)
+    loadModule("Minimap/Button.lua", namespace, environment)
     return namespace
 end
 local A, B = "Player-1234-ABCDEF01", "Player-5678-ABCDEF02"
@@ -302,12 +304,16 @@ for line in toc:gmatch("[^\r\n]+") do
     if key then metadata[key] = value
     elseif line:match("%.lua$") then order[#order + 1] = line:gsub("\\", "/") end
 end
-local function client(saved)
+local function client(saved, settings, absentSettings)
     local state = { guid = A, mapID = 84, zone = "Ventobravo", subZone = "",
         time = TIME, messages = {}, registered = {}, secret = {},
-        inCombat = false, reloads = 0, popupRequests = 0 }
+        inCombat = false, reloads = 0, popupRequests = 0,
+        cursorX = 400, cursorY = 300, scale = 1, shape = "ROUND", tooltipLines = {} }
+    if settings == nil and not absentSettings then
+        settings = { schemaVersion = 1, minimapHidden = false, minimapAngle = 225 }
+    end
     local env = {
-        NerdWow_Journal = saved, type = type, pairs = pairs, ipairs = ipairs,
+        NerdWow_Journal = saved, NerdWow_Settings = settings, type = type, pairs = pairs, ipairs = ipairs,
         math = math, string = string, pcall = pcall,
         SlashCmdList = {}, date = os.date, StaticPopupDialogs = {},
     }
@@ -335,13 +341,74 @@ local function client(saved)
     end }
     env.GetZoneText = function() return state.zone end
     env.GetSubZoneText = function() return state.subZone end
+    env.GetCursorPosition = function() return state.cursorX, state.cursorY end
+    env.GetMinimapShape = function() return state.shape end
+    env.Minimap = {
+        GetFrameLevel = function() return 5 end,
+        GetCenter = function() return 400, 300 end,
+        GetWidth = function() return state.width or 198 end,
+        GetHeight = function() return state.height or 198 end,
+        GetEffectiveScale = function() return state.scale end,
+        HookScript = function(_, name, callback)
+            equal(name, "OnSizeChanged"); state.resize = callback
+        end,
+    }
+    env.GameTooltip = {
+        SetOwner = function(_, owner, anchor) state.tooltipOwner = owner; equal(anchor, "ANCHOR_LEFT") end,
+        IsOwned = function(_, owner) return state.tooltipOwner == owner end,
+        Hide = function() state.tooltipOwner = nil; state.tooltipVisible = false end,
+        SetText = function(_, text) state.tooltipLines = { text } end,
+        AddLine = function(_, text) state.tooltipLines[#state.tooltipLines + 1] = text end,
+        Show = function() state.tooltipVisible = true end,
+    }
+    local function texture()
+        local t = {}
+        function t:SetTexture(path) self.path = path end
+        function t:SetSize(width, height) self.width, self.height = width, height end
+        function t:SetPoint(...) self.point = { ... } end
+        function t:SetAllPoints(target) self.allPoints = target end
+        function t:ClearAllPoints() self.point = nil end
+        function t:SetColorTexture(...) self.color = { ... } end
+        function t:AddMaskTexture(mask) self.mask = mask end
+        function t:SetTexCoord(...) self.texCoord = { ... } end
+        function t:SetVertexColor(...) self.vertexColor = { ... } end
+        return t
+    end
     env.C_AddOns = { GetAddOnMetadata = function(name, key)
         equal(name, "NerdWow"); return metadata[key]
     end }
     env.DEFAULT_CHAT_FRAME = { AddMessage = function(_, message)
         state.messages[#state.messages + 1] = message
     end }
-    env.CreateFrame = function(frameType, name)
+    env.CreateFrame = function(frameType, name, parent)
+        if frameType == "Button" then
+            equal(name, nil); equal(parent, env.Minimap)
+            local button = { scripts = {}, textures = {}, shown = true }
+            function button:SetSize(width, height) self.width, self.height = width, height end
+            function button:SetFrameLevel(level) self.level = level end
+            function button:RegisterForClicks(value) equal(value, "LeftButtonUp") end
+            function button:SetHitRectInsets(...) self.insets = { ... } end
+            function button:CreateMaskTexture() self.mask = texture(); return self.mask end
+            function button:CreateTexture(_, layer)
+                local t = texture(); t.layer = layer; self.textures[#self.textures + 1] = t; return t
+            end
+            function button:SetHighlightTexture(path, mode)
+                self.highlight = texture(); self.highlight.path = path; self.highlight.mode = mode
+            end
+            function button:GetHighlightTexture() return self.highlight end
+            function button:SetPushedTexture(path) self.pushed = texture(); self.pushed.path = path end
+            function button:GetPushedTexture() return self.pushed end
+            function button:SetPoint(...) self.point = { ... } end
+            function button:ClearAllPoints() self.point = nil end
+            function button:SetScript(name, callback) self.scripts[name] = callback end
+            function button:SetShown(shown)
+                local wasShown = self.shown
+                self.shown = shown
+                if wasShown and not shown and self.scripts.OnHide then self.scripts.OnHide(self) end
+            end
+            state.button = button
+            return button
+        end
         equal(frameType, "Frame"); equal(name, nil)
         local frame = {}
         frame.SetScript = function(_, scriptType, callback)
@@ -352,7 +419,7 @@ local function client(saved)
         return frame
     end
     setmetatable(env, { __index = function(_, key)
-        if key == "NerdWow_Journal" then return nil end
+        if key == "NerdWow_Journal" or key == "NerdWow_Settings" then return nil end
         error("API não simulada: " .. key)
     end })
     local namespace = {}
@@ -375,6 +442,11 @@ local function client(saved)
         state.fire("PLAYER_ENTERING_WORLD", true, false)
     end
     state.saved = function() return env.NerdWow_Journal end
+    state.settings = function() return env.NerdWow_Settings end
+    state.buttonEvent = function(name, ...)
+        local callback = state.button.scripts[name]
+        if callback then callback(state.button, ...) end
+    end
     state.env = env
     state.namespace = namespace
     return state
@@ -384,9 +456,9 @@ test("metadados e carregamento real do TOC", function()
     equal(metadata.Interface, "120105")
     equal(metadata.Title, "NerdWow")
     equal(metadata.Author, "Greg")
-    equal(metadata.Version, "0.2.0")
-    equal(metadata.SavedVariables, "NerdWow_Journal")
-    equal(#order, 6)
+    equal(metadata.Version, "0.3.0")
+    equal(metadata.SavedVariables, "NerdWow_Journal, NerdWow_Settings")
+    equal(#order, 9)
     for _, path in ipairs(order) do assert(not path:find("Tests/", 1, true)) end
     local c = client()
     equal(c.env.SLASH_NERDWOW1, "/nerdwow")
@@ -421,7 +493,7 @@ test("entrada, status pt-BR e ajuda", function()
     equal(events[2].type, "LOCATION_CHANGED")
     equal(events[2].timestamp, TIME)
     c.command()
-    assert(c.messages[1]:find("v0.2.0 | esquema 1 | 2 eventos", 1, true))
+    assert(c.messages[1]:find("v0.3.0 | esquema 1 | 2 eventos", 1, true))
     assert(c.messages[1]:find("mudança de local", 1, true))
     assert(c.messages[1]:find("UTC", 1, true))
     assert(c.messages[2]:find("/reload", 1, true))
@@ -651,6 +723,365 @@ test("confirmação indisponível informa falha sem recarregar", function()
     equal(c.reloads, 0)
     equal(c.popup, nil)
     assert(c.messages[1]:find(c.namespace.Text.syncUnavailable, 1, true))
+end)
+
+local function near(actual, expected)
+    assert(math.abs(actual - expected) < 0.000001,
+        "esperado aproximadamente " .. tostring(expected) .. ", obtido " .. tostring(actual))
+end
+local function tooltipText(c)
+    c.buttonEvent("OnEnter")
+    return table.concat(c.tooltipLines, "\n")
+end
+
+test("configuração ausente ou de tipo errado recebe padrões sem API do jogo", function()
+    local settings = core().Settings
+    for _, value in ipairs({ false, 7, "inválida" }) do
+        local handle, root, repaired = settings.Open(value)
+        equal(root.schemaVersion, 1)
+        equal(root.minimapHidden, false)
+        equal(root.minimapAngle, 225)
+        equal(#repaired, 1)
+        equal(repaired[1], "root")
+        equal(handle.Get().minimapAngle, 225)
+    end
+    local _, root, repaired = settings.Open(nil)
+    equal(root.minimapAngle, 225)
+    equal(repaired[1], "root")
+end)
+
+test("configuração válida preserva extras e Get devolve uma cópia", function()
+    local root = { schemaVersion = 1, minimapHidden = true, minimapAngle = 12.5,
+        extension = { keep = true } }
+    local before = serialize(root)
+    local handle, returned, repaired = core().Settings.Open(root)
+    equal(returned, root)
+    equal(#repaired, 0)
+    equal(serialize(root), before)
+    local snapshot = handle.Get()
+    snapshot.minimapAngle = 300
+    equal(root.minimapAngle, 12.5)
+end)
+
+test("recuperação da configuração é restrita ao campo inválido", function()
+    for _, field in ipairs({ "schemaVersion", "minimapHidden", "minimapAngle" }) do
+        local root = { schemaVersion = 1, minimapHidden = true, minimapAngle = 20, extra = "preservar" }
+        root[field] = "inválido"
+        local _, returned, repaired = core().Settings.Open(root)
+        equal(returned, root)
+        equal(#repaired, 1)
+        equal(repaired[1], field)
+        equal(root.extra, "preservar")
+        equal(root.minimapHidden, field ~= "minimapHidden")
+        equal(root.minimapAngle, field == "minimapAngle" and 225 or 20)
+        equal(root.schemaVersion, 1)
+    end
+    local root = { schemaVersion = 99, minimapHidden = true, minimapAngle = 20 }
+    local _, _, repaired = core().Settings.Open(root)
+    equal(repaired[1], "schemaVersion")
+    equal(root.minimapHidden, true)
+    equal(root.minimapAngle, 20)
+end)
+
+test("campos ausentes e todos os limites de ângulo recuperam só o necessário", function()
+    for _, angle in ipairs({ -1, 360, math.huge, -math.huge, 0 / 0, false }) do
+        local root = { schemaVersion = 1, minimapHidden = true, minimapAngle = angle }
+        local _, _, repaired = core().Settings.Open(root)
+        equal(root.minimapAngle, 225)
+        equal(root.minimapHidden, true)
+        equal(#repaired, 1)
+    end
+    for _, field in ipairs({ "schemaVersion", "minimapHidden", "minimapAngle" }) do
+        local root = { schemaVersion = 1, minimapHidden = true, minimapAngle = 0 }
+        root[field] = nil
+        local _, _, repaired = core().Settings.Open(root)
+        equal(#repaired, 1)
+        equal(repaired[1], field)
+    end
+    for _, angle in ipairs({ 0, 359.999 }) do
+        local _, root, repaired = core().Settings.Open({ schemaVersion = 1, minimapHidden = false, minimapAngle = angle })
+        equal(root.minimapAngle, angle)
+        equal(#repaired, 0)
+    end
+end)
+
+test("mutação da configuração valida entradas e persiste visibilidade e ângulo", function()
+    local handle, root = core().Settings.Open(nil)
+    for _, value in ipairs({ false, -1, 360, math.huge, 0 / 0 }) do
+        local before = serialize(root)
+        local ok, code = handle.SetAngle(value)
+        equal(ok, nil); equal(code, "invalid_angle")
+        equal(serialize(root), before)
+    end
+    equal(handle.SetAngle(nil), nil)
+    assert(handle.SetAngle(90.5))
+    equal(handle.ToggleHidden(), true)
+    local resumed = core().Settings.Open(roundtrip(root))
+    equal(resumed.Get().minimapAngle, 90.5)
+    equal(resumed.Get().minimapHidden, true)
+    equal(resumed.ToggleHidden(), false)
+end)
+
+test("posição circular usa borda e ângulo em todos os quadrantes", function()
+    local geometry = core().MinimapButton
+    for _, entry in ipairs({ { 0, 108, 0 }, { 90, 0, 108 }, { 180, -108, 0 }, { 270, 0, -108 } }) do
+        local x, y = geometry.Position(entry[1], 200, 200, "ROUND")
+        near(x, entry[2]); near(y, entry[3])
+    end
+    for angle = 0, 359 do
+        local x, y = geometry.Position(angle, 200, 200, "ROUND")
+        near(x * x + y * y, 108 * 108)
+    end
+end)
+
+test("posição quadrada percorre lados e cantos sem virar um círculo", function()
+    local geometry = core().MinimapButton
+    for angle = 0, 359 do
+        local x, y = geometry.Position(angle, 200, 200, "SQUARE")
+        near(math.max(math.abs(x), math.abs(y)), 108)
+    end
+    local x, y = geometry.Position(45, 200, 200, "SQUARE")
+    near(x, 108); near(y, 108)
+    x, y = geometry.Position(225, 200, 200, "SQUARE")
+    near(x, -108); near(y, -108)
+end)
+
+test("ângulo inverte a posição em tamanhos diferentes e formato desconhecido", function()
+    local geometry = core().MinimapButton
+    for _, shape in ipairs({ "ROUND", "SQUARE" }) do
+        for angle = 1, 359 do
+            local x, y = geometry.Position(angle, 300, 120, shape)
+            near(geometry.Angle(x, y, 300, 120), angle)
+        end
+    end
+    local x, y = geometry.Position(40, 200, 200, "UNKNOWN")
+    local expectedX, expectedY = geometry.Position(40, 200, 200, "ROUND")
+    near(x, expectedX); near(y, expectedY)
+    equal(geometry.Angle(0, 0, 200, 200), nil)
+end)
+
+test("gesto diferencia clique, limiar de arrasto, retorno e cancelamento", function()
+    local gesture = core().MinimapButton.NewGesture()
+    equal(gesture.Release(), nil)
+    equal(gesture.Move(20, 20), false)
+    gesture.Press(0, 0)
+    equal(gesture.Move(3, 0), false)
+    equal(gesture.Release(), "click")
+    gesture.Press(0, 0)
+    equal(gesture.Move(4, 0), true)
+    equal(gesture.Move(0, 0), true)
+    equal(gesture.Release(), "drag")
+    gesture.Press(10, 10)
+    gesture.Move(30, 30)
+    gesture.Cancel()
+    equal(gesture.Release(), nil)
+end)
+
+test("botão tem máscara circular, moldura e estados nativos", function()
+    local c = client()
+    c.start()
+    equal(c.button.width, 32); equal(c.button.height, 32)
+    equal(c.button.level, 13)
+    equal(c.button.mask.path, "Interface\\CHARACTERFRAME\\TempPortraitAlphaMask")
+    equal(c.button.textures[2].path, "Interface\\Icons\\INV_Misc_Book_09")
+    equal(c.button.textures[2].mask, c.button.mask)
+    equal(c.button.textures[3].path, "Interface\\Minimap\\MiniMap-TrackingBorder")
+    equal(c.button.highlight.path, "Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
+    equal(c.button.highlight.mode, "ADD")
+    equal(c.button.pushed.path, "Interface\\Buttons\\UI-Quickslot-Depress")
+    equal(c.button.pushed.mask, c.button.mask)
+    equal(c.button.scripts.OnUpdate, nil)
+    c.buttonEvent("OnMouseDown", "LeftButton")
+    equal(c.button.textures[2].vertexColor[1], 0.65)
+    assert(c.button.scripts.OnUpdate)
+    c.buttonEvent("OnMouseUp", "LeftButton")
+    equal(c.button.textures[2].vertexColor[1], 1)
+    equal(c.button.scripts.OnUpdate, nil)
+end)
+
+test("clique do botão usa Sincronizar e preserva bloqueio em combate", function()
+    local c = client()
+    c.start()
+    local before = serialize(c.saved())
+    c.buttonEvent("OnMouseDown", "LeftButton")
+    c.buttonEvent("OnMouseUp", "LeftButton")
+    equal(c.popupRequests, 1); equal(c.reloads, 0)
+    c.respond(false)
+    c.inCombat = true
+    c.buttonEvent("OnMouseDown", "LeftButton")
+    c.buttonEvent("OnMouseUp", "LeftButton")
+    equal(c.popupRequests, 1); equal(c.reloads, 0)
+    assert(c.messages[#c.messages]:find(c.namespace.Text.syncCombat, 1, true))
+    c.buttonEvent("OnMouseDown", "RightButton")
+    c.buttonEvent("OnMouseUp", "RightButton")
+    equal(c.popupRequests, 1)
+    c.inCombat = false
+    c.buttonEvent("OnMouseDown", "LeftButton")
+    c.buttonEvent("OnMouseUp", "LeftButton", false)
+    equal(c.popupRequests, 1)
+    equal(serialize(c.saved()), before)
+end)
+
+test("arrastar salva posição, não sincroniza e não modifica o diário", function()
+    local c = client()
+    c.start()
+    local before = serialize(c.saved())
+    c.buttonEvent("OnMouseDown", "LeftButton")
+    c.cursorX, c.cursorY = 600, 300
+    c.buttonEvent("OnUpdate")
+    near(c.settings().minimapAngle, 0)
+    c.buttonEvent("OnEnter")
+    equal(c.tooltipVisible, nil)
+    near(c.button.point[4], 107); near(c.button.point[5], 0)
+    c.buttonEvent("OnMouseUp", "LeftButton")
+    equal(c.popupRequests, 0)
+    equal(c.button.scripts.OnUpdate, nil)
+    equal(serialize(c.saved()), before)
+    -- O clique seguinte continua funcionando depois do arrasto.
+    c.buttonEvent("OnMouseDown", "LeftButton")
+    c.buttonEvent("OnMouseUp", "LeftButton")
+    equal(c.popupRequests, 1)
+end)
+
+test("arrastar respeita escala e borda quadrada; resize reposiciona", function()
+    local c = client()
+    c.scale = 2
+    c.shape = "SQUARE"
+    c.cursorX, c.cursorY = 800, 600
+    c.start()
+    c.buttonEvent("OnMouseDown", "LeftButton")
+    c.cursorX, c.cursorY = 1000, 800
+    c.buttonEvent("OnUpdate")
+    near(c.settings().minimapAngle, 45)
+    near(c.button.point[4], 107); near(c.button.point[5], 107)
+    c.buttonEvent("OnMouseUp", "LeftButton")
+    c.width, c.height = 300, 100
+    c.resize()
+    near(c.button.point[4], 158); near(c.button.point[5], 58)
+    equal(c.popupRequests, 0)
+end)
+
+test("ausência de GetMinimapShape usa borda redonda", function()
+    local c = client(nil, { schemaVersion = 1, minimapHidden = false, minimapAngle = 45 })
+    c.env.GetMinimapShape = false
+    c.start()
+    near(c.button.point[4], 107 / math.sqrt(2))
+    near(c.button.point[5], 107 / math.sqrt(2))
+end)
+
+test("botao alterna visibilidade salva e restaura posição no próximo carregamento", function()
+    local c = client()
+    c.command("botao")
+    assert(c.messages[1]:find(c.namespace.Text.buttonNotReady, 1, true))
+    c.start()
+    local before = serialize(c.saved())
+    c.command(" BOTAO ")
+    equal(c.button.shown, false); equal(c.settings().minimapHidden, true)
+    local nextClient = client(roundtrip(c.saved()), roundtrip(c.settings()))
+    nextClient.start()
+    equal(nextClient.button.shown, false)
+    near(nextClient.button.point[4], c.button.point[4])
+    near(nextClient.button.point[5], c.button.point[5])
+    nextClient.command("botao")
+    equal(nextClient.button.shown, true)
+    equal(nextClient.settings().minimapHidden, false)
+    c.command("ajuda")
+    assert(c.messages[#c.messages]:find("/nerdwow botao", 1, true))
+    equal(serialize(c.saved()), before)
+end)
+
+test("ocultar cancela arrasto, remove atualização e fecha apenas sua dica", function()
+    local c = client()
+    c.start()
+    c.buttonEvent("OnEnter")
+    equal(c.tooltipVisible, true)
+    c.buttonEvent("OnMouseDown", "LeftButton")
+    c.command("botao")
+    equal(c.tooltipVisible, false)
+    equal(c.button.scripts.OnUpdate, nil)
+    c.command("botao")
+    c.buttonEvent("OnMouseUp", "LeftButton")
+    equal(c.popupRequests, 0)
+    c.tooltipOwner, c.tooltipVisible = {}, true
+    c.command("botao")
+    equal(c.tooltipVisible, true)
+end)
+
+test("dica mostra versão, totais, pendentes, UTC e instruções em pt-BR", function()
+    local c = client()
+    c.start()
+    local text = tooltipText(c)
+    for _, expected in ipairs({ "NerdWow v0.3.0", "Eventos no diário: 2",
+        "Novos desta sessão aguardando gravação: 2", "Último evento:", "UTC",
+        "Clique esquerdo: sincronizar", "Arraste com o botão esquerdo" }) do
+        assert(text:find(expected, 1, true), expected)
+    end
+    c.subZone = "Interior"
+    c.fire("ZONE_CHANGED_INDOORS")
+    assert(table.concat(c.tooltipLines, "\n"):find("Eventos no diário: 3", 1, true))
+    assert(table.concat(c.tooltipLines, "\n"):find("aguardando gravação: 3", 1, true))
+end)
+
+test("dica de diário bloqueado mostra causa sem inventar contagens", function()
+    local c = client(false)
+    c.start()
+    local text = tooltipText(c)
+    assert(text:find("Gravação suspensa", 1, true))
+    assert(text:find("raiz do diário ausente ou inválida", 1, true))
+    assert(not text:find("Eventos no diário:", 1, true))
+    assert(not text:find("aguardando gravação:", 1, true))
+    assert(text:find("Clique esquerdo", 1, true))
+end)
+
+test("pendentes ignoram falhas e duplicatas e não zeram ao aceitar confirmação", function()
+    local c = client()
+    c.start()
+    c.fire("ZONE_CHANGED")
+    c.zone = ""
+    c.fire("ZONE_CHANGED")
+    assert(tooltipText(c):find("aguardando gravação: 2", 1, true))
+    c.command("sincronizar")
+    c.respond(true)
+    assert(tooltipText(c):find("aguardando gravação: 2", 1, true))
+    local resumed = client(roundtrip(c.saved()), roundtrip(c.settings()))
+    resumed.start()
+    local text = tooltipText(resumed)
+    assert(text:find("Eventos no diário: 3", 1, true))
+    assert(text:find("aguardando gravação: 1", 1, true))
+end)
+
+test("pendentes representam apenas os eventos novos ainda retidos", function()
+    local c = client(rootWith(4999))
+    c.start()
+    assert(tooltipText(c):find("Eventos no diário: 5000", 1, true))
+    assert(tooltipText(c):find("aguardando gravação: 2", 1, true))
+    for index = 1, 5001 do
+        c.subZone = tostring(index)
+        c.fire("ZONE_CHANGED")
+    end
+    assert(tooltipText(c):find("aguardando gravação: 5000", 1, true))
+    equal(c.saved().schemaVersion, 1)
+end)
+
+test("configuração inválida avisa e preserva diário e valores válidos", function()
+    local root = { schemaVersion = 1, minimapHidden = true, minimapAngle = -1, extra = "guardar" }
+    local saved = rootWith(3)
+    local before = serialize(saved)
+    local c = client(saved, root)
+    c.fire("ADDON_LOADED", "NerdWow")
+    equal(c.settings(), root)
+    equal(root.minimapHidden, true)
+    equal(root.minimapAngle, 225)
+    equal(root.extra, "guardar")
+    equal(#c.messages, 1)
+    assert(c.messages[1]:find("posição do botão", 1, true))
+    equal(serialize(saved), before)
+    equal(c.button.shown, false)
+    local first = client(nil, nil, true)
+    first.fire("ADDON_LOADED", "NerdWow")
+    equal(first.settings().schemaVersion, 1)
+    equal(#first.messages, 1)
+    assert(first.messages[1]:find("raiz", 1, true))
 end)
 
 return string.format("%d cenários aprovados; runtime: %s / %s. Integração real no Retail pendente.",

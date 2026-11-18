@@ -94,6 +94,40 @@ function Wow.RegisterCommand(callback)
     SlashCmdList.NERDWOW = callback
 end
 
+local function canSync()
+    if InCombatLockdown() then
+        Wow.Print(addon.Text.syncCombat)
+        return false
+    end
+    return true
+end
+
+StaticPopupDialogs.NERDWOW_SYNC = {
+    text = addon.Text.syncConfirmation,
+    button1 = addon.Text.syncAccept,
+    button2 = addon.Text.syncCancel,
+    OnAccept = function()
+        -- O combate pode ter começado enquanto a confirmação estava aberta.
+        if canSync() then
+            C_UI.Reload()
+        end
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+}
+
+function Wow.RequestSync()
+    if canSync() and not StaticPopup_Show("NERDWOW_SYNC") then
+        Wow.Print(addon.Text.syncUnavailable)
+    end
+end
+
+-- Global exigida pelo AddonCompartmentFunc; o restante permanece no namespace privado.
+function NerdWow_OnAddonCompartmentClick()
+    Wow.RequestSync()
+end
+
 function Wow.Listen(callback)
     -- Frame sem nome e sem elementos visuais; usado apenas como receptor de eventos.
     local frame = CreateFrame("Frame")

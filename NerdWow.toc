@@ -1,9 +1,10 @@
-## Interface: 120100
+## Interface: 120105
 ## Title: NerdWow
 ## Notes: Diário de eventos do personagem para o Nerd-Wow.
 ## Author: Greg
-## Version: 0.1.0
+## Version: 0.2.0
 ## SavedVariables: NerdWow_Journal
+## AddonCompartmentFunc: NerdWow_OnAddonCompartmentClick
 
 Locales\ptBR.lua
 Journal\Schema.lua

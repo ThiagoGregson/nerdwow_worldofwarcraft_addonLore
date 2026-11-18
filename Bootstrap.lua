@@ -58,6 +58,10 @@ end
 
 Wow.RegisterCommand(function(message)
     local argument = (message or ""):match("^%s*(.-)%s*$"):lower()
+    if argument == "sincronizar" then
+        Wow.RequestSync()
+        return
+    end
     if argument ~= "ajuda" and argument ~= "?" then
         if journal then
             local status = journal.GetStatus()

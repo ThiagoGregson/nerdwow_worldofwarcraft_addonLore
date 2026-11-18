@@ -304,12 +304,22 @@ for line in toc:gmatch("[^\r\n]+") do
 end
 local function client(saved)
     local state = { guid = A, mapID = 84, zone = "Ventobravo", subZone = "",
-        time = TIME, messages = {}, registered = {}, secret = {} }
+        time = TIME, messages = {}, registered = {}, secret = {},
+        inCombat = false, reloads = 0, popupRequests = 0 }
     local env = {
         NerdWow_Journal = saved, type = type, pairs = pairs, ipairs = ipairs,
         math = math, string = string, pcall = pcall,
-        SlashCmdList = {}, date = os.date,
+        SlashCmdList = {}, date = os.date, StaticPopupDialogs = {},
     }
+    env.InCombatLockdown = function() return state.inCombat end
+    env.C_UI = { Reload = function() state.reloads = state.reloads + 1 end }
+    env.StaticPopup_Show = function(which)
+        assert(env.StaticPopupDialogs[which], "Confirmação não registrada")
+        state.popupRequests = state.popupRequests + 1
+        if state.popupUnavailable then return nil end
+        state.popup = { which = which }
+        return state.popup
+    end
     env.issecretvalue = function(value) return value == state.secret end
     env.UnitName = function(unit) equal(unit, "player"); return "Exemplo", nil end
     env.GetRealmName = function() return "Reino" end
@@ -352,6 +362,14 @@ local function client(saved)
         state.callback(state.frame, name, ...)
     end
     state.command = function(argument) env.SlashCmdList.NERDWOW(argument or "") end
+    state.compartment = function(button)
+        env[metadata.AddonCompartmentFunc]("NerdWow", button or "LeftButton")
+    end
+    state.respond = function(accept)
+        local popup = assert(state.popup, "Confirmação não está aberta")
+        state.popup = nil
+        if accept then env.StaticPopupDialogs[popup.which].OnAccept(popup) end
+    end
     state.start = function()
         state.fire("ADDON_LOADED", "NerdWow")
         state.fire("PLAYER_ENTERING_WORLD", true, false)
@@ -363,10 +381,10 @@ local function client(saved)
 end
 
 test("metadados e carregamento real do TOC", function()
-    equal(metadata.Interface, "120100")
+    equal(metadata.Interface, "120105")
     equal(metadata.Title, "NerdWow")
     equal(metadata.Author, "Greg")
-    equal(metadata.Version, "0.1.0")
+    equal(metadata.Version, "0.2.0")
     equal(metadata.SavedVariables, "NerdWow_Journal")
     equal(#order, 6)
     for _, path in ipairs(order) do assert(not path:find("Tests/", 1, true)) end
@@ -403,7 +421,7 @@ test("entrada, status pt-BR e ajuda", function()
     equal(events[2].type, "LOCATION_CHANGED")
     equal(events[2].timestamp, TIME)
     c.command()
-    assert(c.messages[1]:find("v0.1.0 | esquema 1 | 2 eventos", 1, true))
+    assert(c.messages[1]:find("v0.2.0 | esquema 1 | 2 eventos", 1, true))
     assert(c.messages[1]:find("mudança de local", 1, true))
     assert(c.messages[1]:find("UTC", 1, true))
     assert(c.messages[2]:find("/reload", 1, true))
@@ -528,6 +546,111 @@ test("status vazio, data não formatável e aviso de retenção", function()
     oversized.fire("ADDON_LOADED", "NerdWow")
     equal(#oversized.saved().events, 5000)
     assert(oversized.messages[1]:find("2 eventos descartados", 1, true))
+end)
+
+test("sincronizar pede confirmação pt-BR antes de recarregar", function()
+    local c = client()
+    c.start()
+    local before = serialize(c.saved())
+    c.command(" SINCRONIZAR ")
+    equal(c.popupRequests, 1)
+    equal(c.reloads, 0)
+    equal(#c.messages, 0)
+    local dialog = c.env.StaticPopupDialogs[c.popup.which]
+    equal(dialog.text, c.namespace.Text.syncConfirmation)
+    assert(dialog.text:find("interface será recarregada", 1, true))
+    assert(dialog.text:find("gravar o diário", 1, true))
+    equal(dialog.button1, "Sincronizar")
+    equal(dialog.button2, "Cancelar")
+    equal(dialog.hideOnEscape, true)
+    equal(dialog.timeout, 0)
+    c.respond(true)
+    equal(c.reloads, 1)
+    equal(serialize(c.saved()), before)
+end)
+
+test("cancelar sincronização não recarrega nem altera o diário", function()
+    local c = client()
+    c.start()
+    local before = serialize(c.saved())
+    c.command("sincronizar")
+    c.respond(false)
+    equal(c.reloads, 0)
+    equal(serialize(c.saved()), before)
+end)
+
+test("TOC resolve callback do compartimento para a mesma confirmação", function()
+    equal(metadata.AddonCompartmentFunc, "NerdWow_OnAddonCompartmentClick")
+    for _, button in ipairs({ "LeftButton", "RightButton" }) do
+        local c = client()
+        c.start()
+        local before = serialize(c.saved())
+        equal(type(c.env[metadata.AddonCompartmentFunc]), "function")
+        c.compartment(button)
+        equal(c.popupRequests, 1)
+        equal(c.reloads, 0)
+        c.respond(true)
+        equal(c.reloads, 1)
+        equal(serialize(c.saved()), before)
+        local count = 0
+        for _ in pairs(c.registered) do count = count + 1 end
+        equal(count, 6)
+    end
+end)
+
+test("combate recusa comando e compartimento sem abrir confirmação", function()
+    local c = client()
+    c.start()
+    local before = serialize(c.saved())
+    c.inCombat = true
+    c.command("sincronizar")
+    c.compartment()
+    equal(c.popupRequests, 0)
+    equal(c.reloads, 0)
+    equal(#c.messages, 2)
+    for _, message in ipairs(c.messages) do
+        assert(message:find(c.namespace.Text.syncCombat, 1, true))
+    end
+    equal(serialize(c.saved()), before)
+end)
+
+test("combate iniciado durante confirmação impede o reload sem agendamento", function()
+    local c = client()
+    c.start()
+    local before = serialize(c.saved())
+    c.compartment()
+    c.inCombat = true
+    c.respond(true)
+    equal(c.reloads, 0)
+    assert(c.messages[1]:find(c.namespace.Text.syncCombat, 1, true))
+    c.inCombat = false
+    equal(c.reloads, 0)
+    equal(serialize(c.saved()), before)
+    c.command("sincronizar")
+    c.respond(true)
+    equal(c.reloads, 1)
+end)
+
+test("ajuda cita sincronizar e comando não depende de diário válido", function()
+    local c = client(false)
+    c.start()
+    c.command("ajuda")
+    assert(c.messages[#c.messages]:find("/nerdwow sincronizar", 1, true))
+    c.command("sincronizar")
+    equal(c.reloads, 0)
+    c.respond(true)
+    equal(c.reloads, 1)
+    equal(c.saved(), false)
+end)
+
+test("confirmação indisponível informa falha sem recarregar", function()
+    local c = client()
+    c.start()
+    c.popupUnavailable = true
+    c.command("sincronizar")
+    equal(c.reloads, 0)
+    equal(c.popup, nil)
+    assert(c.messages[1]:find(c.namespace.Text.syncUnavailable, 1, true))
 end)
 
 return string.format("%d cenários aprovados; runtime: %s / %s. Integração real no Retail pendente.",

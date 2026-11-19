@@ -5,6 +5,7 @@ local settings, minimap
 local pendingEvents = 0
 local inWorld = false
 local initialized = false
+local interfaceInWorld = false
 local warnings = {}
 local questDialogs = addon.QuestSession.New()
 addon.QuestDialogs = questDialogs
@@ -99,6 +100,11 @@ local dialogueEvents = {}
 for _, module in ipairs({ addon.QuestCapture, addon.GossipCapture }) do
     for _, event in ipairs(module.Events) do dialogueEvents[#dialogueEvents + 1] = event end
 end
+dialogueEvents[#dialogueEvents + 1] = "PLAYER_REGEN_DISABLED"
+local cinema = addon.ConversationController.New({ GetModel = gossipDialogs.GetCurrent,
+    IsEnabled = function() return interfaceInWorld and settings and settings.Get().dialogEnabled end,
+    Platform = addon.ConversationPlatform, View = addon.ConversationView,
+    Report = function(code) Wow.Print(string.format(Text.cinemaFailure,reason(code))) end })
 
 local function tooltip()
     local view = { version = Wow.Version() }
@@ -127,6 +133,13 @@ Wow.RegisterCommand(function(message)
         local hidden = settings.ToggleHidden()
         minimap.Refresh()
         Wow.Print(hidden and Text.buttonHidden or Text.buttonShown)
+        return
+    end
+    if argument == "dialogo" then
+        if not settings then Wow.Print(Text.dialogNotReady); return end
+        local enabled = settings.ToggleDialog()
+        cinema.Toggle()
+        Wow.Print(enabled and Text.dialogEnabled or Text.dialogDisabled)
         return
     end
     if argument ~= "ajuda" and argument ~= "?" then
@@ -173,10 +186,13 @@ Wow.Listen(function(event, loadedName, experience, money)
         return
     end
     if initialized then
+        if event == "PLAYER_ENTERING_WORLD" then interfaceInWorld = true
+        elseif event == "PLAYER_LEAVING_WORLD" then interfaceInWorld = false end
         local handled = false
         for _, capture in ipairs(captures) do
             handled = capture.Handle(event, loadedName, experience, money) or handled
         end
+        handled = cinema.Handle(event) or handled
         if handled then return end
     end
     if not journal then

@@ -18,13 +18,16 @@ end
 local function core()
     local namespace = {}
     local environment = setmetatable({ type = type, math = math, string = string,
-        pairs = pairs, ipairs = ipairs }, {
+        pairs = pairs, ipairs = ipairs, table = table, tonumber = tonumber, pcall = pcall, error = error }, {
         __index = function(_, key) error("Global proibida no núcleo: " .. key) end,
     })
     loadModule("Dialogue/Quest.lua", namespace, environment)
     loadModule("Dialogue/QuestSession.lua", namespace, environment)
     loadModule("Dialogue/Gossip.lua", namespace, environment)
     loadModule("Dialogue/GossipSession.lua", namespace, environment)
+    loadModule("Interface/Themes.lua", namespace, environment)
+    loadModule("Interface/Conversation.lua", namespace, environment)
+    loadModule("Interface/ConversationController.lua", namespace, environment)
     loadModule("Journal/Schema.lua", namespace, environment)
     loadModule("Journal/Journal.lua", namespace, environment)
     loadModule("Configuration/Settings.lua", namespace, environment)
@@ -329,12 +332,14 @@ local function client(saved, settings, absentSettings)
         active = { { questID = 202, title = "Um registro antigo", isComplete = false, isTrivial = true } } }
     state.timers = {}
     if settings == nil and not absentSettings then
-        settings = { schemaVersion = 1, minimapHidden = false, minimapAngle = 225 }
+        settings = { schemaVersion = 1, minimapHidden = false, minimapAngle = 225 , dialogEnabled = true}
     end
     local env = {
         NerdWow_Journal = saved, NerdWow_Settings = settings, type = type, pairs = pairs, ipairs = ipairs,
         math = math, string = string, pcall = pcall, tonumber = tonumber,
+        table = table, error = error, assert = assert, tostring = tostring,
         SlashCmdList = {}, date = os.date, StaticPopupDialogs = {},
+        UIParent = false,
     }
     env.InCombatLockdown = function() return state.inCombat end
     env.C_UI = { Reload = function() state.reloads = state.reloads + 1 end }
@@ -551,9 +556,9 @@ test("metadados e carregamento real do TOC", function()
     equal(metadata.Interface, "120105")
     equal(metadata.Title, "NerdWow")
     equal(metadata.Author, "Greg")
-    equal(metadata.Version, "0.5.0")
+    equal(metadata.Version, "0.6.0")
     equal(metadata.SavedVariables, "NerdWow_Journal, NerdWow_Settings")
-    equal(#order, 18)
+    equal(#order, 23)
     for _, path in ipairs(order) do assert(not path:find("Tests/", 1, true)) end
     local c = client()
     equal(c.env.SLASH_NERDWOW1, "/nerdwow")
@@ -588,7 +593,7 @@ test("entrada, status pt-BR e ajuda", function()
     equal(events[2].type, "LOCATION_CHANGED")
     equal(events[2].timestamp, TIME)
     c.command()
-    assert(c.messages[1]:find("v0.5.0 | esquema 1 | 2 eventos", 1, true))
+    assert(c.messages[1]:find("v0.6.0 | esquema 1 | 2 eventos", 1, true))
     assert(c.messages[1]:find("mudança de local", 1, true))
     assert(c.messages[1]:find("UTC", 1, true))
     assert(c.messages[2]:find("/reload", 1, true))
@@ -761,7 +766,7 @@ test("TOC resolve callback do compartimento para a mesma confirmação", functio
         equal(serialize(c.saved()), before)
         local count = 0
         for _ in pairs(c.registered) do count = count + 1 end
-        equal(count, 20)
+        equal(count, 21)
     end
 end)
 
@@ -846,7 +851,7 @@ test("configuração ausente ou de tipo errado recebe padrões sem API do jogo",
 end)
 
 test("configuração válida preserva extras e Get devolve uma cópia", function()
-    local root = { schemaVersion = 1, minimapHidden = true, minimapAngle = 12.5,
+    local root = { schemaVersion = 1, minimapHidden = true, minimapAngle = 12.5, dialogEnabled = true,
         extension = { keep = true } }
     local before = serialize(root)
     local handle, returned, repaired = core().Settings.Open(root)
@@ -860,7 +865,7 @@ end)
 
 test("recuperação da configuração é restrita ao campo inválido", function()
     for _, field in ipairs({ "schemaVersion", "minimapHidden", "minimapAngle" }) do
-        local root = { schemaVersion = 1, minimapHidden = true, minimapAngle = 20, extra = "preservar" }
+        local root = { schemaVersion = 1, minimapHidden = true, minimapAngle = 20, dialogEnabled = true, extra = "preservar" }
         root[field] = "inválido"
         local _, returned, repaired = core().Settings.Open(root)
         equal(returned, root)
@@ -871,7 +876,7 @@ test("recuperação da configuração é restrita ao campo inválido", function(
         equal(root.minimapAngle, field == "minimapAngle" and 225 or 20)
         equal(root.schemaVersion, 1)
     end
-    local root = { schemaVersion = 99, minimapHidden = true, minimapAngle = 20 }
+    local root = { schemaVersion = 99, minimapHidden = true, minimapAngle = 20 , dialogEnabled = true}
     local _, _, repaired = core().Settings.Open(root)
     equal(repaired[1], "schemaVersion")
     equal(root.minimapHidden, true)
@@ -880,21 +885,21 @@ end)
 
 test("campos ausentes e todos os limites de ângulo recuperam só o necessário", function()
     for _, angle in ipairs({ -1, 360, math.huge, -math.huge, 0 / 0, false }) do
-        local root = { schemaVersion = 1, minimapHidden = true, minimapAngle = angle }
+        local root = { schemaVersion = 1, minimapHidden = true, minimapAngle = angle , dialogEnabled = true}
         local _, _, repaired = core().Settings.Open(root)
         equal(root.minimapAngle, 225)
         equal(root.minimapHidden, true)
         equal(#repaired, 1)
     end
     for _, field in ipairs({ "schemaVersion", "minimapHidden", "minimapAngle" }) do
-        local root = { schemaVersion = 1, minimapHidden = true, minimapAngle = 0 }
+        local root = { schemaVersion = 1, minimapHidden = true, minimapAngle = 0 , dialogEnabled = true}
         root[field] = nil
         local _, _, repaired = core().Settings.Open(root)
         equal(#repaired, 1)
         equal(repaired[1], field)
     end
     for _, angle in ipairs({ 0, 359.999 }) do
-        local _, root, repaired = core().Settings.Open({ schemaVersion = 1, minimapHidden = false, minimapAngle = angle })
+        local _, root, repaired = core().Settings.Open({ schemaVersion = 1, minimapHidden = false, minimapAngle = angle , dialogEnabled = true})
         equal(root.minimapAngle, angle)
         equal(#repaired, 0)
     end
@@ -1057,7 +1062,7 @@ test("arrastar respeita escala e borda quadrada; resize reposiciona", function()
 end)
 
 test("ausência de GetMinimapShape usa borda redonda", function()
-    local c = client(nil, { schemaVersion = 1, minimapHidden = false, minimapAngle = 45 })
+    local c = client(nil, { schemaVersion = 1, minimapHidden = false, minimapAngle = 45 , dialogEnabled = true})
     c.env.GetMinimapShape = false
     c.start()
     near(c.button.point[4], 107 / math.sqrt(2))
@@ -1106,7 +1111,7 @@ test("dica mostra versão, totais, pendentes, UTC e instruções em pt-BR", func
     local c = client()
     c.start()
     local text = tooltipText(c)
-    for _, expected in ipairs({ "NerdWow v0.5.0", "Eventos no diário: 2",
+    for _, expected in ipairs({ "NerdWow v0.6.0", "Eventos no diário: 2",
         "Novos desta sessão aguardando gravação: 2", "Último evento:", "UTC",
         "Clique esquerdo: sincronizar", "Arraste com o botão esquerdo" }) do
         assert(text:find(expected, 1, true), expected)
@@ -1159,7 +1164,7 @@ test("pendentes representam apenas os eventos novos ainda retidos", function()
 end)
 
 test("configuração inválida avisa e preserva diário e valores válidos", function()
-    local root = { schemaVersion = 1, minimapHidden = true, minimapAngle = -1, extra = "guardar" }
+    local root = { schemaVersion = 1, minimapHidden = true, minimapAngle = -1, dialogEnabled = true, extra = "guardar" }
     local saved = rootWith(3)
     local before = serialize(saved)
     local c = client(saved, root)
@@ -1185,5 +1190,8 @@ local estimate = questSuite({ test = test, equal = equal, core = core, client = 
 local gossipSuite = assert(loadstring(sources["Tests/Gossip.lua"], "@Tests/Gossip.lua"))
 gossipSuite({ test = test, equal = equal, core = core, client = client,
     serialize = serialize, roundtrip = roundtrip, tooltipText = tooltipText, A = A, B = B, TIME = TIME })
+local interfaceSuite = assert(loadstring(sources["Tests/Conversation.lua"], "@Tests/Conversation.lua"))
+interfaceSuite({ test = test, equal = equal, core = core, client = client, loadModule = loadModule,
+    roundtrip = roundtrip, serialize = serialize })
 return string.format("%d cenários aprovados; runtime: %s / %s. Integração real no Retail pendente.\n%s",
     passed, _VERSION, jit and jit.version or "sem JIT", estimate)

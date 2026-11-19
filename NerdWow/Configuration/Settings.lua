@@ -9,7 +9,7 @@ end
 function Settings.Open(saved)
     local root, repaired = saved, {}
     if type(root) ~= "table" then
-        root = { schemaVersion = Settings.VERSION, minimapHidden = false, minimapAngle = 225 }
+        root = { schemaVersion = Settings.VERSION, minimapHidden = false, minimapAngle = 225, dialogEnabled = true }
         repaired[#repaired + 1] = "root"
     end
     if root.schemaVersion ~= Settings.VERSION then
@@ -24,10 +24,14 @@ function Settings.Open(saved)
         root.minimapAngle = 225
         repaired[#repaired + 1] = "minimapAngle"
     end
+    if type(root.dialogEnabled) ~= "boolean" then
+        root.dialogEnabled = true
+        repaired[#repaired + 1] = "dialogEnabled"
+    end
     local handle = {}
     function handle.Get()
         return { schemaVersion = root.schemaVersion,
-            minimapHidden = root.minimapHidden, minimapAngle = root.minimapAngle }
+            minimapHidden = root.minimapHidden, minimapAngle = root.minimapAngle, dialogEnabled = root.dialogEnabled }
     end
     function handle.SetAngle(angle)
         if not validAngle(angle) then return nil, "invalid_angle" end
@@ -37,6 +41,10 @@ function Settings.Open(saved)
     function handle.ToggleHidden()
         root.minimapHidden = not root.minimapHidden
         return root.minimapHidden
+    end
+    function handle.ToggleDialog()
+        root.dialogEnabled = not root.dialogEnabled
+        return root.dialogEnabled
     end
     return handle, root, repaired
 end

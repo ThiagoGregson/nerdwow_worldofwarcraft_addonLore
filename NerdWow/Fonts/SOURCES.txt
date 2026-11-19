@@ -1,0 +1,9 @@
+NerdWow - bundled fonts, unmodified static TTFs. Not installed into the operating system.
+Cinzel Regular/Bold: https://github.com/NDISCOVER/Cinzel/tree/dd598495b0fb2ad84270d5cc75d642d2f1e8eabf/fonts/ttf
+EB Garamond Regular/Italic: https://github.com/octaviopardo/EBGaramond12/tree/106a4a6d377987459ae5e68673a4570f13b957fb/fonts/ttf
+Original OFL licenses included alongside each family.
+Downloaded 2026-11-19. SHA-256:
+Cinzel-Bold.ttf 0C23EC565DB45C5508EE95889C60AD87DEBD167CA07167A43A5D68572B4E2EAC
+Cinzel-Regular.ttf AF0031129F27DC752E8629A80B793D27ABEA94027FAA27CC660C3FC33F607A1F
+EBGaramond-Italic.ttf D4AD1D0A9390D26D6D3F176117A1D121441EDB8C8632BFCA52CFAD084B9059CB
+EBGaramond-Regular.ttf 2028DC06D3C130B4761693481436A32A8E35ED500BF58C25C53DE004106125B8

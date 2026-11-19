@@ -1,9 +1,67 @@
-param(
+﻿param(
     [string]$LuaDll = 'C:\Program Files\obs-studio\bin\64bit\lua51.dll'
 )
 
 $ErrorActionPreference = 'Stop'
 $addonRoot = Split-Path -Parent $PSScriptRoot
+# Verifica cmap Unicode nos TTF reais: a simulação de FontString não renderiza glifos.
+function Read-U16([byte[]]$Bytes, [int]$Offset) {
+    return [int]$Bytes[$Offset] * 256 + [int]$Bytes[$Offset + 1]
+}
+function Read-U32([byte[]]$Bytes, [int]$Offset) {
+    return [uint64]$Bytes[$Offset] * 16777216 + [uint64]$Bytes[$Offset + 1] * 65536 +
+        [uint64]$Bytes[$Offset + 2] * 256 + [uint64]$Bytes[$Offset + 3]
+}
+function Get-UnicodeGlyph([byte[]]$Bytes, [int]$CodePoint) {
+    $cmap = $null
+    for ($i = 0; $i -lt (Read-U16 $Bytes 4); $i++) {
+        $record = 12 + $i * 16
+        if ([Text.Encoding]::ASCII.GetString($Bytes, $record, 4) -eq 'cmap') {
+            $cmap = [int](Read-U32 $Bytes ($record + 8))
+        }
+    }
+    if ($null -eq $cmap) { return 0 }
+    for ($i = 0; $i -lt (Read-U16 $Bytes ($cmap + 2)); $i++) {
+        $record = $cmap + 4 + $i * 8
+        $platform = Read-U16 $Bytes $record
+        $encoding = Read-U16 $Bytes ($record + 2)
+        if ($platform -ne 0 -and -not ($platform -eq 3 -and $encoding -in @(1,10))) { continue }
+        $sub = $cmap + [int](Read-U32 $Bytes ($record + 4))
+        $format = Read-U16 $Bytes $sub
+        if ($format -eq 4) {
+            $segments = (Read-U16 $Bytes ($sub + 6)) / 2
+            $ends = $sub + 14; $starts = $ends + 2 * $segments + 2
+            $deltas = $starts + 2 * $segments; $ranges = $deltas + 2 * $segments
+            for ($j = 0; $j -lt $segments; $j++) {
+                $first = Read-U16 $Bytes ($starts + 2 * $j); $last = Read-U16 $Bytes ($ends + 2 * $j)
+                if ($CodePoint -lt $first -or $CodePoint -gt $last) { continue }
+                $delta = Read-U16 $Bytes ($deltas + 2 * $j); $range = Read-U16 $Bytes ($ranges + 2 * $j)
+                if ($range -eq 0) { $glyph = ($CodePoint + $delta) % 65536 }
+                else {
+                    $glyph = Read-U16 $Bytes ($ranges + 2 * $j + $range + 2 * ($CodePoint - $first))
+                    if ($glyph -ne 0) { $glyph = ($glyph + $delta) % 65536 }
+                }
+                if ($glyph -gt 0) { return $glyph }
+                break
+            }
+        } elseif ($format -eq 12) {
+            for ($j = 0; $j -lt (Read-U32 $Bytes ($sub + 12)); $j++) {
+                $group = $sub + 16 + 12 * $j
+                $first = Read-U32 $Bytes $group; $last = Read-U32 $Bytes ($group + 4)
+                if ($CodePoint -ge $first -and $CodePoint -le $last) {
+                    $glyph = (Read-U32 $Bytes ($group + 8)) + $CodePoint - $first
+                    if ($glyph -gt 0) { return $glyph }
+                }
+            }
+        }
+    }
+    return 0
+}
+foreach ($name in @('Cinzel-Regular','Cinzel-Bold','EBGaramond-Regular','EBGaramond-Italic')) {
+    $fontBytes = [IO.File]::ReadAllBytes((Join-Path $addonRoot ('Fonts\' + $name + '.ttf')))
+    if ((Get-UnicodeGlyph $fontBytes 0xD7) -eq 0) { throw "Fonte sem U+00D7: $name" }
+}
+Write-Output 'Fontes: U+00D7 confirmado nos quatro TTF (cmap Unicode, glifo diferente de .notdef).'
 if (-not (Test-Path -LiteralPath $LuaDll -PathType Leaf)) {
     throw 'Runtime não encontrado. Informe -LuaDll com uma DLL Lua 5.1 de 64 bits instalada.'
 }

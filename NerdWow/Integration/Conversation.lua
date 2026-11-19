@@ -7,6 +7,13 @@ local function plain(value)
     if issecretvalue and issecretvalue(value) then error("restricted_interface") end
     return value
 end
+local function mutable(frame)
+    if (frame.IsForbidden and plain(frame:IsForbidden()))
+        or (frame.IsProtected and plain(frame:IsProtected()))
+        or (frame.CanChangeProtectedState and plain(frame:CanChangeProtectedState())~=true) then
+        error("native_frame_restricted")
+    end
+end
 function Platform.Defer(callback)
     if type(C_Timer)~="table" or type(C_Timer.After)~="function" then return false end
     C_Timer.After(0,callback)
@@ -21,15 +28,27 @@ function Platform.RestoreNative()
     local api=addon.DiagnosticAPI
     local attempt=api and api.Try or pcall
     local function restore(fn,frame,value)
-        local ok,fault=attempt(fn,frame,value)
+        local ok,fault=attempt(function() mutable(frame); fn(frame,value) end)
         if not ok then failures[#failures+1]=fault end
         return ok
     end
     for _, state in ipairs(states) do
         local ok=true
-        if state.alpha~=nil then ok=restore(state.frame.SetAlpha,state.frame,state.alpha) and ok end
-        if state.mouse~=nil then ok=restore(state.frame.EnableMouse,state.frame,state.mouse) and ok end
-        if state.keyboard~=nil then ok=restore(state.frame.EnableKeyboard,state.frame,state.keyboard) and ok end
+        if state.alphaChanged then
+            local restored=restore(state.frame.SetAlpha,state.frame,state.alpha)
+            if restored then state.alphaChanged=nil end
+            ok=restored and ok
+        end
+        if state.mouseChanged then
+            local restored=restore(state.frame.EnableMouse,state.frame,state.mouse)
+            if restored then state.mouseChanged=nil end
+            ok=restored and ok
+        end
+        if state.keyboardChanged then
+            local restored=restore(state.frame.EnableKeyboard,state.frame,state.keyboard)
+            if restored then state.keyboardChanged=nil end
+            ok=restored and ok
+        end
         if not ok then remaining[#remaining+1]=state end
     end
     states=remaining
@@ -50,8 +69,8 @@ function Platform.TakeNative(moment,onShow)
     local function visit(frame)
         if visited[frame] then return end
         visited[frame]=true
-        if #collected>=1024 or (frame.IsForbidden and plain(frame:IsForbidden()))
-            or (frame.IsProtected and plain(frame:IsProtected())) then error("native_frame_restricted") end
+        if #collected>=1024 then error("native_frame_restricted") end
+        mutable(frame)
         local state={frame=frame}
         if frame==root then
             state.alpha=plain(frame:GetAlpha())
@@ -59,6 +78,8 @@ function Platform.TakeNative(moment,onShow)
         end
         if frame.IsMouseEnabled then state.mouse=plain(frame:IsMouseEnabled()) end
         if frame.IsKeyboardEnabled then state.keyboard=plain(frame:IsKeyboardEnabled()) end
+        if (state.mouse~=nil and type(state.mouse)~="boolean")
+            or (state.keyboard~=nil and type(state.keyboard)~="boolean") then error("native_state_unavailable") end
         collected[#collected+1]=state
         if frame.GetChildren then for _, child in ipairs({frame:GetChildren()}) do visit(child) end end
     end
@@ -66,11 +87,17 @@ function Platform.TakeNative(moment,onShow)
     -- Captura toda a transação antes da primeira alteração, inclusive filhos.
     states=collected
     for _, state in ipairs(states) do
-        if state.mouse~=nil then state.frame:EnableMouse(false) end
-        if state.keyboard~=nil then state.frame:EnableKeyboard(false) end
+        if state.mouse then
+            mutable(state.frame); state.mouseChanged=true; state.frame:EnableMouse(false)
+        end
+        if state.keyboard then
+            mutable(state.frame); state.keyboardChanged=true; state.frame:EnableKeyboard(false)
+        end
     end
+    mutable(root); states[1].alphaChanged=true
     root:SetAlpha(0)
     if not hooked[root] then
+        mutable(root)
         root:HookScript("OnShow",function()
             if activeRoot==root and notify then notify() end
         end)

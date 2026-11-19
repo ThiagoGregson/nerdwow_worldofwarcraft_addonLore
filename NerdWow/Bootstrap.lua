@@ -90,6 +90,9 @@ local function captureLocation()
     end
     local payload, code, field, detail = Wow.ReadLocation()
     if not payload then
+        -- A zona ainda não existe durante algumas transições; a próxima
+        -- notificação de local repete a leitura sem inventar uma localização.
+        if code=="api_unavailable" and field=="payload.zone" then return end
         rejected(code,"LOCATION_CHANGED",field,detail,nil,"location_read")
         warn(code)
         return

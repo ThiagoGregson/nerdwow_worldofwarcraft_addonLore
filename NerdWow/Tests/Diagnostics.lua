@@ -2,7 +2,7 @@ local t=...
 local test,equal,core,client=t.test,t.equal,t.core,t.client
 local function entry(code)
     return {category="interface",code=code or "interface_error",message="original failure",stack="original stack",
-        timestamp=1795101185,version="0.6.1",context={gameEvent="GOSSIP_SHOW",moment="GOSSIP",creatureID=197,stage="show"}}
+        timestamp=1795101185,version="0.6.2",context={gameEvent="GOSSIP_SHOW",moment="GOSSIP",creatureID=197,stage="show"}}
 end
 local function recent(c) return c.diagnostics().entries[#c.diagnostics().entries] end
 
@@ -57,7 +57,7 @@ test("barreira preserva mensagem textual e stack antes de desenrolar a pilha",fu
     c.namespace.DiagnosticAPI.Record("interface","interface_error",fault,{gameEvent="GOSSIP_SHOW",stage="show"},
         {moment="GOSSIP",npc={creatureID=197}})
     local saved=recent(c)
-    equal(saved.message,fault.message); equal(saved.stack,fault.stack); equal(saved.version,"0.6.1")
+    equal(saved.message,fault.message); equal(saved.stack,fault.stack); equal(saved.version,"0.6.2")
     equal(saved.context.gameEvent,"GOSSIP_SHOW"); equal(saved.context.moment,"GOSSIP"); equal(saved.context.creatureID,197)
     equal(saved.timestamp,c.time)
 end)
@@ -139,8 +139,10 @@ test("contexto transitório incompleto vira indisponível com campo e tenta nova
     equal(saved.context.captureType,"CHARACTER_CONTEXT")
     c.env.UnitRace=function() return "Humano","Human",1 end
     c.fire("ZONE_CHANGED"); equal(c.saved().nextSequence,sequence+1)
+    local diagnosticsBefore=t.serialize(c.diagnostics()); local messagesBefore=#c.messages
     c.zone=""; sequence=c.saved().nextSequence; c.fire("ZONE_CHANGED")
-    equal(c.saved().nextSequence,sequence); equal(recent(c).context.field,"payload.zone")
+    equal(c.saved().nextSequence,sequence); equal(t.serialize(c.diagnostics()),diagnosticsBefore)
+    equal(#c.messages,messagesBefore)
     c.zone="Zona recuperada"; c.fire("ZONE_CHANGED"); equal(c.saved().nextSequence,sequence+1)
 end)
 
@@ -235,4 +237,36 @@ test("diagnóstico persiste cada falha de interface mesmo com aviso já emitido"
         if message:find("devolveu",1,true) then warnings=warnings+1; assert(message:find("/nerdwow diagnostico",1,true)) end
     end
     equal(warnings,1)
+end)
+
+test("zona vazia ou ausente na entrada do mundo é silenciosa e capturada no próximo evento",function()
+    for _, mode in ipairs({"empty","nil"}) do
+        local c=client(); c.zone=mode=="empty" and "" or nil
+        c.start()
+        equal(#c.saved().events,1); equal(c.saved().events[1].type,"CHARACTER_CONTEXT")
+        equal(#c.messages,0); equal(#c.diagnostics().entries,0)
+        local nextSequence=c.saved().nextSequence
+        c.zone="Vila Norte"; c.fire("ZONE_CHANGED_NEW_AREA")
+        equal(c.saved().nextSequence,nextSequence+1)
+        equal(c.saved().events[2].type,"LOCATION_CHANGED"); equal(c.saved().events[2].payload.zone,"Vila Norte")
+        equal(#c.messages,0); equal(#c.diagnostics().entries,0)
+    end
+end)
+
+test("silêncio da zona não elimina histórico nem esconde erro real de captura posterior",function()
+    local c=client(); c.start()
+    c.namespace.DiagnosticAPI.Record("interface","interface_error",{message="FontString:SetText(): Font not set"})
+    local before=t.serialize(c.diagnostics())
+    c.zone=""; c.fire("ZONE_CHANGED"); equal(t.serialize(c.diagnostics()),before); equal(#c.messages,0)
+    c.zone="Vila Norte"; c.subZone=nil; c.fire("ZONE_CHANGED")
+    equal(recent(c).code,"api_unavailable"); equal(recent(c).context.field,"payload.subZone")
+    equal(#c.messages,1)
+    c.zone=c.secret; c.fire("ZONE_CHANGED")
+    equal(recent(c).code,"secret_value"); equal(recent(c).context.field,"payload.zone")
+    c.zone=false; c.subZone=""; c.fire("ZONE_CHANGED")
+    equal(recent(c).code,"invalid_input"); equal(recent(c).context.field,"payload.zone")
+    c.env.GetZoneText=function() error("location_original_error") end
+    c.fire("ZONE_CHANGED")
+    equal(recent(c).code,"api_error"); assert(recent(c).message:find("location_original_error",1,true))
+    assert(recent(c).stack); equal(recent(c).context.captureType,"LOCATION_CHANGED")
 end)

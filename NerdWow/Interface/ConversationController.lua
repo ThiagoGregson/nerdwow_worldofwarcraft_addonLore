@@ -50,7 +50,7 @@ function Controller.New(options)
             Key=function(key) if token==generation then return controller.Key(key) end end,
             Close=function() if token==generation then controller.Close() end end,
             Error=function(fault,stage,context) if token==generation then controller.Fail(fault,stage,context) end end,
-            NativeShown=function() if token==generation then controller.Refresh() end end,
+            NativeShown=function() if token==generation then controller.Schedule() end end,
         }
     end
     function controller.Refresh(retry)

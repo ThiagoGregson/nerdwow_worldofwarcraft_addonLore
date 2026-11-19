@@ -44,16 +44,21 @@ local function controller(n)
 end
 local function nativeFrame(children)
     local f={alpha=.75,mouse=true,keyboard=false,children=children or {},scripts={}}
+    local function writable()
+        f.setterCalls=(f.setterCalls or 0)+1
+        assert(not f.protected and not f.forbidden and not f.stateLocked,"setter nativo restrito")
+    end
     function f:IsProtected() return self.protected or false end
     function f:IsForbidden() return self.forbidden or false end
+    function f:CanChangeProtectedState() return not self.protected and not self.forbidden and not self.stateLocked end
     function f:GetAlpha() return self.alpha end
-    function f:SetAlpha(value) self.alpha=value end
+    function f:SetAlpha(value) writable(); self.alpha=value end
     function f:IsMouseEnabled() return self.mouse end
-    function f:EnableMouse(value) if self.failDisable and not value then error("mouse failure") end; self.mouse=value end
+    function f:EnableMouse(value) writable(); if self.failDisable and not value then error("mouse failure") end; self.mouse=value end
     function f:IsKeyboardEnabled() return self.keyboard end
-    function f:EnableKeyboard(value) self.keyboard=value end
+    function f:EnableKeyboard(value) writable(); self.keyboard=value end
     function f:GetChildren() return unpack(self.children) end
-    function f:HookScript(name,callback) self.scripts[name]=callback end
+    function f:HookScript(name,callback) writable(); self.scripts[name]=callback end
     return f
 end
 local function platform(n)
@@ -361,8 +366,11 @@ local function renderer(n)
         function f:SetAlpha(value) self.alpha=value end
         function f:SetFrameStrata(value) self.strata=value end
         function f:EnableMouse(value) self.mouse=value end
-        function f:EnableKeyboard(value) self.keyboard=value end
-        function f:SetPropagateKeyboardInput(value) self.propagate=value end
+        local function keyboardFrame()
+            assert(kind=="Frame" or kind=="Button" or kind=="ScrollFrame","teclado exige frame")
+        end
+        function f:EnableKeyboard(value) keyboardFrame(); assert(type(value)=="boolean"); self.keyboard=value end
+        function f:SetPropagateKeyboardInput(value) keyboardFrame(); assert(type(value)=="boolean"); self.propagate=value end
         function f:EnableMouseWheel(value) self.wheel=value end
         function f:RegisterForClicks(value) self.clicks=value end
         function f:SetEnabled(value) self.enabled=value end
@@ -377,17 +385,41 @@ local function renderer(n)
         end
         function f:CreateTexture() return make("Texture",self) end
         function f:CreateMaskTexture() return make("Mask",self) end
-        function f:CreateFontString() return make("FontString",self) end
-        function f:SetTexture(value) self.texture=value; return true end
-        function f:SetColorTexture(...) self.fill={...} end
-        function f:SetGradient(...) self.gradient={...} end
+        function f:CreateFontString(_,_,template)
+            local value=make("FontString",self)
+            if template then
+                assert(template=="GameFontNormal","modelo de fonte não simulado")
+                value.font,value.size="Fonts\\FRIZQT__.TTF",12
+            end
+            return value
+        end
+        function f:SetTexture(value)
+            assert(kind=="Texture" or kind=="Mask","SetTexture exige textura")
+            assert(value==nil or type(value)=="string" or type(value)=="number","asset de textura inválido")
+            self.texture=value; return true
+        end
+        function f:SetColorTexture(...) assert(kind=="Texture"); self.fill={...} end
+        function f:SetGradient(orientation,from,to)
+            assert(kind=="Texture" and (orientation=="HORIZONTAL" or orientation=="VERTICAL"))
+            assert(from.kind=="Color" and to.kind=="Color","gradiente exige objetos de cor")
+            self.gradient={orientation,from,to}
+        end
         function f:SetVertexColor(...) self.tint={...} end
-        function f:AddMaskTexture(value) self.mask=value end
+        function f:AddMaskTexture(value)
+            assert(kind=="Texture" and value.kind=="Mask","máscara exige MaskTexture")
+            assert(self.parent==value.parent,"superfície de teste exige o mesmo pai para máscara")
+            self.mask=value
+        end
         function f:SetFont(path,size)
+            assert(kind=="FontString" and type(path)=="string" and path~="")
+            assert(type(size)=="number" and size>0 and size<math.huge)
             if state.badFont then return false end
             self.font,self.size=path,size; return true
         end
-        function f:SetText(value) self.text=value end
+        function f:SetText(value)
+            if self.kind=="FontString" and not self.font then error("FontString:SetText(): Font not set") end
+            self.text=value
+        end
         function f:SetTextColor(...) self.textColor={...} end
         function f:SetShadowColor(...) self.shadow={...} end
         function f:SetShadowOffset(...) self.shadowOffset={...} end
@@ -411,7 +443,7 @@ local function renderer(n)
     local env={type=type,pairs=pairs,ipairs=ipairs,math=math,string=string,tonumber=tonumber,tostring=tostring,
         pcall=pcall,error=error,assert=assert,UIParent=parent,xpcall=xpcall,unpack=unpack,select=select,setmetatable=setmetatable,
         debugstack=function() return debug.traceback("stack",2) end,
-        CreateColor=function(...) return {...} end,
+        CreateColor=function(...) local color={...}; color.kind="Color"; return color end,
         CreateFrame=function(kind,_,frameParent)
             local frame=make(kind,frameParent); state.frames[#state.frames+1]=frame; return frame
         end}
@@ -541,6 +573,90 @@ test("falha de restauração conserva erro original e ainda restaura os demais e
     equal(p.root.mouse,true); equal(p.child.mouse,true); equal(p.child.keyboard,true)
     p.root.SetAlpha=original
     p.api.RestoreNative(); equal(p.root.alpha,.75)
+end)
+
+test("regra do cliente rejeita texto sem fonte e aceita fonte base desde a criação",function()
+    local r=renderer(core())
+    local without=r.parent:CreateFontString(nil,"OVERLAY")
+    local ok,err=pcall(without.SetText,without,"×")
+    equal(ok,false); assert(err:find("FontString:SetText(): Font not set",1,true))
+    local initialized=r.parent:CreateFontString(nil,"OVERLAY","GameFontNormal")
+    equal(pcall(initialized.SetText,initialized,"×"),true)
+end)
+
+test("todos os rótulos inclusive fechar têm fonte antes do primeiro texto e mantêm fontes do tema",function()
+    local n=core(); local r=renderer(n)
+    local view=n.ConversationView.New({Error=function(fault) error(fault.message) end})
+    local exitLabel
+    for _, region in ipairs(r.regions) do
+        if region.kind=="FontString" then
+            assert(region.font,"FontString sem fonte na criação")
+            if region.text=="×" then exitLabel=region end
+        end
+    end
+    assert(exitLabel,"botão de fechar deve preservar o glifo aprovado")
+    equal(view.Show(assert(n.Conversation.Build(model()))),true)
+    assert(exitLabel.font:find("Cinzel-Regular.ttf",1,true))
+    for _, region in ipairs(r.regions) do
+        if region.kind=="FontString" then assert(region.font:find("NerdWow\\Fonts\\",1,true)) end
+    end
+    view.Hide(); equal(view.Show(assert(n.Conversation.Build(model("GREETING")))),true)
+end)
+
+test("simulação rejeita máscara e teclado de tipos errados sem fingir renderização real",function()
+    local r=renderer(core())
+    local texture=r.parent:CreateTexture()
+    equal(pcall(texture.AddMaskTexture,texture,r.parent:CreateTexture()),false)
+    equal(pcall(texture.EnableKeyboard,texture,true),false)
+    equal(pcall(texture.SetGradient,texture,"HORIZONTAL",{},{}),false)
+    local mask=r.parent:CreateMaskTexture()
+    equal(pcall(texture.AddMaskTexture,texture,mask),true)
+    equal(pcall(texture.SetTexture,texture,{}),false)
+end)
+
+test("substituição recusa estado imutável mesmo fora de combate sem chamar setters",function()
+    local p=platform(core()); p.child.stateLocked=true
+    equal(pcall(p.api.TakeNative,"GOSSIP"),false)
+    equal(p.root.setterCalls,nil); equal(p.child.setterCalls,nil); equal(p.root.alpha,.75)
+    p.child.stateLocked=false; p.child.CanChangeProtectedState=function() return p.secret end
+    equal(pcall(p.api.TakeNative,"GOSSIP"),false); equal(p.root.setterCalls,nil)
+end)
+
+test("proteção que muda após inspeção impede setter e permite rollback das alterações anteriores",function()
+    local p=platform(core()); local original=p.root.EnableMouse
+    p.root.EnableMouse=function(self,value) original(self,value); if not value then p.child.protected=true end end
+    equal(pcall(p.api.TakeNative,"GOSSIP"),false)
+    equal(p.child.setterCalls,nil); equal(p.root.mouse,false)
+    p.api.RestoreNative(); equal(p.root.mouse,true); equal(p.root.alpha,.75)
+    equal(p.child.mouse,true); equal(p.child.setterCalls,nil)
+end)
+
+test("restauração adia estado agora protegido sem chamar setter e tenta os demais",function()
+    local p=platform(core()); p.api.TakeNative("GOSSIP",function() end)
+    local calls=p.child.setterCalls
+    p.child.protected=true
+    equal(pcall(p.api.RestoreNative),false)
+    equal(p.child.setterCalls,calls); equal(p.root.alpha,.75); equal(p.root.mouse,true)
+    p.child.protected=false; p.api.RestoreNative()
+    equal(p.child.mouse,true); equal(p.child.keyboard,true)
+end)
+
+test("estados nativos já desligados não recebem setters desnecessários nem hooks repetidos",function()
+    local p=platform(core()); p.api.TakeNative("GOSSIP",function() end)
+    equal(p.sibling.setterCalls,nil)
+    p.api.RestoreNative(); equal(p.sibling.setterCalls,nil)
+    local hook=p.root.scripts.OnShow
+    p.api.TakeNative("GOSSIP",function() end); equal(p.root.scripts.OnShow,hook)
+    p.api.RestoreNative()
+end)
+
+test("pós-hook nativo só agenda sem executar transação dentro do handler Blizzard",function()
+    local s=controller(); s.ctrl.Refresh()
+    local reads=s.reads; local callback=s.callbacks.NativeShown
+    callback()
+    equal(s.reads,reads); equal(s.native,true); equal(#s.queued,1)
+    s.flush(); equal(s.reads,reads+1); equal(s.native,true)
+    callback(); equal(#s.queued,0) -- geração antiga não reaplica a interface.
 end)
 
 test("fonte que não carrega aciona fallback antes de suprimir apresentação nativa",function()

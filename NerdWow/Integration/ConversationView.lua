@@ -39,7 +39,7 @@ local function texture(parent,layer)
     return parent:CreateTexture(nil,layer or "BACKGROUND")
 end
 local function label(parent)
-    local result=parent:CreateFontString(nil,"OVERLAY")
+    local result=parent:CreateFontString(nil,"OVERLAY","GameFontNormal")
     result:SetJustifyH("LEFT"); result:SetJustifyV("TOP")
     result:SetWordWrap(true)
     return result

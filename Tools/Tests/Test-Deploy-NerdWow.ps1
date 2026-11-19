@@ -44,6 +44,7 @@ try {
     New-Item -ItemType Directory -Path $source, $addOns -Force | Out-Null
     $realSource = Join-Path $projectRoot 'NerdWow'
     $toc = [IO.File]::ReadAllText((Join-Path $realSource 'NerdWow.toc'))
+    $runtimeCount = 1 + @($toc -split '\r?\n' | Where-Object { $_ -match '^[^#].*\.lua$' }).Count
     Write-Fixture (Join-Path $source 'NerdWow.toc') $toc
     foreach ($line in $toc -split '\r?\n') {
         if ($line -match '^[^#].*\.lua$') {
@@ -67,8 +68,8 @@ try {
     Assert (-not (Test-Path -LiteralPath $destination)) 'WhatIf criou o destino'
     $passed++
     $first = & $deploy -SourcePath $source -AddOnsPath $addOns
-    Assert ($first.Created.Count -eq 7) 'Primeira cópia não criou sete arquivos'
-    Assert (@(Get-ChildItem -LiteralPath $destination -File -Recurse -Force).Count -eq 7) 'Arquivos extras implantados'
+    Assert ($first.Created.Count -eq $runtimeCount) 'Primeira cópia diverge do manifesto'
+    Assert (@(Get-ChildItem -LiteralPath $destination -File -Recurse -Force).Count -eq $runtimeCount) 'Arquivos extras implantados'
     Assert (-not (Test-Path -LiteralPath (Join-Path $destination 'Tests'))) 'Tests foi implantado'
     Assert (-not (Test-Path -LiteralPath (Join-Path $destination '.git'))) 'Git foi implantado'
     foreach ($relative in $first.Created) {
@@ -78,27 +79,32 @@ try {
     $passed++
     $repeat = & $deploy -SourcePath $source -AddOnsPath $addOns
     Assert ($repeat.Created.Count -eq 0 -and $repeat.Updated.Count -eq 0 -and
-        $repeat.Removed.Count -eq 0 -and $repeat.Unchanged.Count -eq 7) 'Repetição não é idempotente'
+        $repeat.Removed.Count -eq 0 -and $repeat.Unchanged.Count -eq $runtimeCount) 'Repetição não é idempotente'
     $passed++
 
     Write-Fixture (Join-Path $destination 'Bootstrap.lua') 'old runtime'
     Write-Fixture (Join-Path $destination 'Legacy\obsolete.lua') 'obsolete'
     Write-Fixture (Join-Path $destination 'Tests\must-remove.lua') 'obsolete test'
     Write-Fixture (Join-Path $destination '.git\must-remove.txt') 'obsolete metadata'
+    $beforeWhatIf = Snapshot $destination
+    & $deploy -SourcePath $source -AddOnsPath $addOns -WhatIf
+    Assert ((Snapshot $destination) -eq $beforeWhatIf) 'WhatIf alterou um destino existente'
+    $passed++
     $update = & $deploy -SourcePath $source -AddOnsPath $addOns
     Assert ($update.Updated.Count -eq 1 -and $update.Updated[0] -eq 'Bootstrap.lua') 'Atualização incorreta'
     Assert ($update.Removed.Count -eq 6) 'Arquivos e pastas excedentes não removidos'
-    Assert (@(Get-ChildItem -LiteralPath $destination -File -Recurse -Force).Count -eq 7) 'Espelho incompleto'
+    Assert (@(Get-ChildItem -LiteralPath $destination -File -Recurse -Force).Count -eq $runtimeCount) 'Espelho incompleto'
     Assert ((Snapshot $source) -eq $sourceSnapshot) 'Origem modificada'
     $passed++
 
     # Corrigir conflitos de tipo sem apagar nenhum caminho externo ao destino.
     $integration = Join-Path $destination 'Integration'
-    Remove-Item -LiteralPath (Join-Path $integration 'Wow.lua'), (Join-Path $integration 'Database.lua')
+    $integrationFiles = @(Get-ChildItem -LiteralPath $integration -File)
+    foreach ($file in $integrationFiles) { Remove-Item -LiteralPath $file.FullName }
     Remove-Item -LiteralPath $integration
     Write-Fixture $integration 'file where directory belongs'
     $conflict = & $deploy -SourcePath $source -AddOnsPath $addOns
-    Assert ($conflict.Created.Count -eq 2 -and $conflict.Removed.Count -eq 1) 'Conflito arquivo para pasta não corrigido'
+    Assert ($conflict.Created.Count -eq $integrationFiles.Count -and $conflict.Removed.Count -eq 1) 'Conflito arquivo para pasta não corrigido'
     $bootstrap = Join-Path $destination 'Bootstrap.lua'
     Remove-Item -LiteralPath $bootstrap
     Write-Fixture (Join-Path $bootstrap 'obsolete.txt') 'directory where file belongs'

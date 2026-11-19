@@ -11,6 +11,13 @@ function Get-AbsolutePath([string]$Path) {
     return [IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
 }
 
+function Get-ContentHash([string]$Path) {
+    # InputStream evita a resolução do provider que falha sob -WhatIf no PowerShell 5.1.
+    $stream = [IO.File]::OpenRead($Path)
+    try { return (Get-FileHash -InputStream $stream -Algorithm SHA256).Hash }
+    finally { $stream.Dispose() }
+}
+
 function Assert-NoLink([string]$Path) {
     # Verifica cada ancestral existente, inclusive links pendentes.
     $current = $Path
@@ -118,8 +125,8 @@ try {
         Assert-WithinDestination $target
         $item = Get-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue
         if (-not $item -or $item.PSIsContainer) { $created += $relative }
-        elseif ((Get-FileHash -LiteralPath $manifest[$relative] -Algorithm SHA256).Hash -ne
-                (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash) { $updated += $relative }
+        elseif ((Get-ContentHash $manifest[$relative]) -ne
+                (Get-ContentHash $target)) { $updated += $relative }
         else { $unchanged += $relative }
     }
     # Arquivos que precisam virar diretórios também são excedentes.
@@ -157,8 +164,7 @@ try {
         Assert-WithinDestination $target
         Assert-NoLink $manifest[$relative]
         Copy-Item -LiteralPath $manifest[$relative] -Destination $target -Force
-        if ((Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash -ne
-            (Get-FileHash -LiteralPath $manifest[$relative] -Algorithm SHA256).Hash) {
+        if ((Get-ContentHash $target) -ne (Get-ContentHash $manifest[$relative])) {
             throw "Conteúdo copiado diverge da origem: '$relative'."
         }
         if ($relative -in $created) { Write-Host "Criado: $relative" }

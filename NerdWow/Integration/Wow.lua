@@ -136,7 +136,8 @@ function Wow.Listen(callback)
     end)
     for _, event in ipairs({ "ADDON_LOADED", "PLAYER_ENTERING_WORLD",
         "PLAYER_LEAVING_WORLD", "ZONE_CHANGED", "ZONE_CHANGED_INDOORS",
-        "ZONE_CHANGED_NEW_AREA" }) do
+        "ZONE_CHANGED_NEW_AREA", "QUEST_DETAIL", "QUEST_PROGRESS", "QUEST_COMPLETE",
+        "QUEST_ACCEPTED", "QUEST_TURNED_IN", "QUEST_FINISHED", "QUEST_ITEM_UPDATE" }) do
         frame:RegisterEvent(event)
     end
 end

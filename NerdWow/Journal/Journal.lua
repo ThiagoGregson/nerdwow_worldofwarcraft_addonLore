@@ -49,6 +49,18 @@ function Journal.Open(saved)
                     break
                 end
             end
+        elseif addon.QuestDialogue.IsEvent(kind) then
+            for index = #root.events, 1, -1 do
+                local previous = root.events[index]
+                if previous.type == kind and previous.characterKey == key
+                    and previous.payload.quest.id == snapshot.quest.id
+                    and previous.payload.moment == snapshot.moment then
+                    if addon.QuestDialogue.Equal(previous.payload, snapshot) then
+                        return nil, "duplicate_quest"
+                    end
+                    break
+                end
+            end
         end
         if root.nextSequence >= Schema.MAX_SEQUENCE then
             return nil, "sequence_exhausted"

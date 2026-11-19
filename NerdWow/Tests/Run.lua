@@ -21,6 +21,8 @@ local function core()
         pairs = pairs, ipairs = ipairs }, {
         __index = function(_, key) error("Global proibida no núcleo: " .. key) end,
     })
+    loadModule("Dialogue/Quest.lua", namespace, environment)
+    loadModule("Dialogue/QuestSession.lua", namespace, environment)
     loadModule("Journal/Schema.lua", namespace, environment)
     loadModule("Journal/Journal.lua", namespace, environment)
     loadModule("Configuration/Settings.lua", namespace, environment)
@@ -150,7 +152,7 @@ test("entradas inválidas não consomem sequência nem alteram a raiz", function
         equal(code, "invalid_input")
         equal(serialize(root), before)
     end
-    local _, code = journal.Append("QUEST_ACCEPTED", A, TIME, {})
+    local _, code = journal.Append("QUEST_ABANDONED", A, TIME, {})
     equal(code, "unsupported_type")
 end)
 
@@ -309,12 +311,22 @@ local function client(saved, settings, absentSettings)
         time = TIME, messages = {}, registered = {}, secret = {},
         inCombat = false, reloads = 0, popupRequests = 0,
         cursorX = 400, cursorY = 300, scale = 1, shape = "ROUND", tooltipLines = {} }
+    state.quest = { id = 101, title = "Os nomes nas margens", description = "Recupere a história.",
+        objectiveText = "Traga três tomos.", progressText = "Encontrou os tomos?", rewardText = "Eles serão lembrados.",
+        objectives = { { text = "Tomos", type = "item", numFulfilled = 1, numRequired = 3, finished = false } },
+        choices = { { itemID = 501, name = "Pena", icon = 1234, quantity = 1, quality = 3 },
+            { itemID = 502, name = "Tinteiro", icon = 1235, quantity = 2, quality = 4 } },
+        fixed = { { itemID = 503, name = "Tomo", icon = 1236, quantity = 1, quality = 2 } },
+        required = { { itemID = 504, name = "Tomos chamuscados", icon = 1237, quantity = 3, quality = 1 } },
+        money = 120, experience = 450 }
+    state.npc = { guid = "Creature-0-123-0-84-777-ABC", name = "Arquivista", faction = "Alliance",
+        subtitle = "<Guardiã dos registros>" }
     if settings == nil and not absentSettings then
         settings = { schemaVersion = 1, minimapHidden = false, minimapAngle = 225 }
     end
     local env = {
         NerdWow_Journal = saved, NerdWow_Settings = settings, type = type, pairs = pairs, ipairs = ipairs,
-        math = math, string = string, pcall = pcall,
+        math = math, string = string, pcall = pcall, tonumber = tonumber,
         SlashCmdList = {}, date = os.date, StaticPopupDialogs = {},
     }
     env.InCombatLockdown = function() return state.inCombat end
@@ -327,13 +339,54 @@ local function client(saved, settings, absentSettings)
         return state.popup
     end
     env.issecretvalue = function(value) return value == state.secret end
-    env.UnitName = function(unit) equal(unit, "player"); return "Exemplo", nil end
+    env.UnitName = function(unit)
+        if unit == "npc" then return state.npc and state.npc.name end
+        equal(unit, "player"); return "Exemplo", nil
+    end
     env.GetRealmName = function() return "Reino" end
     env.UnitRace = function() return "Humano", "Human", 1 end
     env.UnitClass = function() return "Mago", "MAGE", 8 end
-    env.UnitGUID = function() return state.guid end
+    env.UnitGUID = function(unit)
+        if unit == "npc" then return state.npc and state.npc.guid end
+        return state.guid
+    end
     env.UnitLevel = function() return 80 end
-    env.UnitFactionGroup = function() return "Alliance" end
+    env.UnitFactionGroup = function(unit)
+        if unit == "npc" then return state.npc and state.npc.faction end
+        return "Alliance"
+    end
+    env.UnitExists = function(unit) equal(unit, "npc"); return state.npc ~= nil end
+    env.C_TooltipInfo = { GetUnit = function(unit)
+        equal(unit, "npc"); return { lines = { {}, { leftText = state.npc and state.npc.subtitle } } }
+    end }
+    env.GetQuestID = function() return state.quest.id end
+    for _, entry in ipairs({ { "GetTitleText", "title" }, { "GetQuestText", "description" },
+        { "GetObjectiveText", "objectiveText" }, { "GetProgressText", "progressText" },
+        { "GetRewardText", "rewardText" }, { "GetRewardMoney", "money" }, { "GetRewardXP", "experience" } }) do
+        local field = entry[2]
+        env[entry[1]] = function() return state.quest[field] end
+    end
+    env.C_QuestLog = {
+        GetQuestObjectives = function(id) if id == state.quest.id then return state.quest.objectives end end,
+        GetTitleForQuestID = function(id) return state.logTitle or (id == state.quest.id and state.quest.title or nil) end,
+    }
+    env.C_QuestOffer = { GetHideRequiredItems = function() return state.hideRequired end }
+    local function questItems(kind)
+        return state.quest[kind == "reward" and "fixed" or kind == "choice" and "choices" or "required"]
+    end
+    env.GetNumQuestItems = function() return state.quest.required and #state.quest.required end
+    env.GetNumQuestChoices = function() return state.quest.choices and #state.quest.choices end
+    env.GetNumQuestRewards = function() return state.quest.fixed and #state.quest.fixed end
+    env.IsQuestItemHidden = function(index) return state.hiddenItem == index end
+    env.GetQuestItemInfo = function(kind, index)
+        local item = questItems(kind)[index]
+        return item.name, item.icon, item.quantity, item.quality, true, item.itemID
+    end
+    env.GetQuestItemLink = function(kind, index) return questItems(kind)[index].link end
+    env.hooksecurefunc = function(name, callback) equal(name, "GetQuestReward"); state.rewardHook = callback end
+    env.GetQuestReward = function(index)
+        if state.rewardHook then state.rewardHook(index) end
+    end
     env.GetServerTime = function() return state.time end
     env.C_Map = { GetBestMapForUnit = function(unit)
         equal(unit, "player")
@@ -456,14 +509,14 @@ test("metadados e carregamento real do TOC", function()
     equal(metadata.Interface, "120105")
     equal(metadata.Title, "NerdWow")
     equal(metadata.Author, "Greg")
-    equal(metadata.Version, "0.3.0")
+    equal(metadata.Version, "0.4.0")
     equal(metadata.SavedVariables, "NerdWow_Journal, NerdWow_Settings")
-    equal(#order, 9)
+    equal(#order, 12)
     for _, path in ipairs(order) do assert(not path:find("Tests/", 1, true)) end
     local c = client()
     equal(c.env.SLASH_NERDWOW1, "/nerdwow")
     equal(c.saved(), nil)
-    equal(c.registered.QUEST_DETAIL, nil)
+    equal(c.registered.QUEST_DETAIL, true)
     equal(c.registered.COMBAT_LOG_EVENT_UNFILTERED, nil)
 end)
 
@@ -493,7 +546,7 @@ test("entrada, status pt-BR e ajuda", function()
     equal(events[2].type, "LOCATION_CHANGED")
     equal(events[2].timestamp, TIME)
     c.command()
-    assert(c.messages[1]:find("v0.3.0 | esquema 1 | 2 eventos", 1, true))
+    assert(c.messages[1]:find("v0.4.0 | esquema 1 | 2 eventos", 1, true))
     assert(c.messages[1]:find("mudança de local", 1, true))
     assert(c.messages[1]:find("UTC", 1, true))
     assert(c.messages[2]:find("/reload", 1, true))
@@ -666,7 +719,7 @@ test("TOC resolve callback do compartimento para a mesma confirmação", functio
         equal(serialize(c.saved()), before)
         local count = 0
         for _ in pairs(c.registered) do count = count + 1 end
-        equal(count, 6)
+        equal(count, 13)
     end
 end)
 
@@ -1011,7 +1064,7 @@ test("dica mostra versão, totais, pendentes, UTC e instruções em pt-BR", func
     local c = client()
     c.start()
     local text = tooltipText(c)
-    for _, expected in ipairs({ "NerdWow v0.3.0", "Eventos no diário: 2",
+    for _, expected in ipairs({ "NerdWow v0.4.0", "Eventos no diário: 2",
         "Novos desta sessão aguardando gravação: 2", "Último evento:", "UTC",
         "Clique esquerdo: sincronizar", "Arraste com o botão esquerdo" }) do
         assert(text:find(expected, 1, true), expected)
@@ -1084,5 +1137,8 @@ test("configuração inválida avisa e preserva diário e valores válidos", fun
     assert(first.messages[1]:find("raiz", 1, true))
 end)
 
-return string.format("%d cenários aprovados; runtime: %s / %s. Integração real no Retail pendente.",
-    passed, _VERSION, jit and jit.version or "sem JIT")
+local questSuite = assert(loadstring(sources["Tests/Quests.lua"], "@Tests/Quests.lua"))
+local estimate = questSuite({ test = test, equal = equal, core = core, client = client,
+    serialize = serialize, roundtrip = roundtrip, tooltipText = tooltipText, A = A, B = B, TIME = TIME })
+return string.format("%d cenários aprovados; runtime: %s / %s. Integração real no Retail pendente.\n%s",
+    passed, _VERSION, jit and jit.version or "sem JIT", estimate)

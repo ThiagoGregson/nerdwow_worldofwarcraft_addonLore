@@ -8,6 +8,7 @@ local Schema = {
     MAX_SEQUENCE = 9007199254740991,
 }
 addon.Schema = Schema
+local Quest = addon.QuestDialogue
 
 local payloadFields = {
     CHARACTER_CONTEXT = {
@@ -46,6 +47,8 @@ local function validPayload(kind, key, payload)
     elseif kind == "LOCATION_CHANGED" then
         return (payload.mapID == nil or integer(payload.mapID, 1, Schema.MAX_SEQUENCE))
             and text(payload.zone) and type(payload.subZone) == "string"
+    elseif Quest.IsEvent(kind) then
+        return Quest.ValidateEvent(kind, payload) ~= nil
     end
     -- Leitura compatível com tipos futuros aditivos. Escrita é restrita abaixo.
     return true
@@ -102,13 +105,18 @@ end
 
 -- Retorna uma fotografia dos campos conhecidos; entradas inválidas não têm efeitos.
 function Schema.ValidateInput(kind, key, timestamp, payload)
-    if type(kind) ~= "string" or not payloadFields[kind] then
+    if type(kind) ~= "string" or not (payloadFields[kind] or Quest.IsEvent(kind)) then
         return nil, "unsupported_type"
     end
-    if not characterKey(key) or not integer(timestamp, 1, Schema.MAX_SEQUENCE)
-        or not validPayload(kind, key, payload) then
+    if not characterKey(key) or not integer(timestamp, 1, Schema.MAX_SEQUENCE) then
         return nil, "invalid_input"
     end
+    if Quest.IsEvent(kind) then
+        local snapshot = Quest.ValidateEvent(kind, payload)
+        if not snapshot then return nil, "invalid_input" end
+        return snapshot
+    end
+    if not validPayload(kind, key, payload) then return nil, "invalid_input" end
     local snapshot = {}
     for _, field in ipairs(payloadFields[kind]) do
         snapshot[field] = payload[field]

@@ -27,10 +27,15 @@ addon.Text = {
     unavailable = "indisponível",
     blocked = "Gravação suspensa: %s. Os dados existentes foram preservados.",
     captureFailed = "Evento não registrado: %s.",
+    questPartial = "Diálogo de missão lido com campos indisponíveis: %s.",
     retention = "Retenção aplicada; %d eventos descartados no total (limite: %d).",
     eventTypes = {
         CHARACTER_CONTEXT = "contexto do personagem",
         LOCATION_CHANGED = "mudança de local",
+        QUEST_OFFERED = "missão oferecida",
+        QUEST_ACCEPTED = "missão aceita",
+        QUEST_PROGRESS_VIEWED = "progresso da missão visto",
+        QUEST_COMPLETED = "missão concluída",
     },
     errors = {
         invalid_root = "raiz do diário ausente ou inválida",
@@ -45,5 +50,6 @@ addon.Text = {
         api_unavailable = "dados do jogo ainda indisponíveis",
         secret_value = "dados restritos do jogo indisponíveis para captura",
         not_initialized = "diário ainda não inicializado",
+        invalid_dialogue = "modelo de diálogo de missão inválido",
     },
 }

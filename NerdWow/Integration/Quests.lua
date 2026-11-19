@@ -108,7 +108,8 @@ function API.Read(moment)
     local questID = r.Number(r.Call(GetQuestID), 1)
     if not questID then return nil, r.Issue() or "api_unavailable" end
     local result = { moment = moment, quest = { id = questID, title = r.String(r.Call(GetTitleText)) },
-        npc = npc(r), location = API.Location(), objectives = objectives(r, questID) }
+        npc = npc(r), location = API.Location() }
+    if moment ~= "COMPLETE" then result.objectives = objectives(r, questID) end
     if moment == "OFFER" then
         result.quest.description = r.String(r.Call(GetQuestText))
         result.quest.objectiveText = r.String(r.Call(GetObjectiveText))
@@ -133,9 +134,10 @@ function API.ReadLog(questID, moment)
     local r = reader()
     questID = r.Number(questID, 1)
     if not questID then return nil, r.Issue() or "api_unavailable" end
-    return { moment = moment, quest = { id = questID,
-        title = r.String(r.Call(C_QuestLog.GetTitleForQuestID, questID)) },
-        objectives = objectives(r, questID) }, r.Issue()
+    local result = { moment = moment, quest = { id = questID,
+        title = r.String(r.Call(C_QuestLog.GetTitleForQuestID, questID)) } }
+    if moment ~= "COMPLETE" then result.objectives = objectives(r, questID) end
+    return result, r.Issue()
 end
 
 function API.EventInfo(questID, experience, money)

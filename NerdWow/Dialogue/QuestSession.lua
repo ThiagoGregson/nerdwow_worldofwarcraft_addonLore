@@ -66,7 +66,11 @@ function Session.New()
             end
             if cached and cached.quest.id == questID and selected then result.chosenReward = selected end
         end
-        local snapshot, code = Quest.ValidateEvent(kind, result)
+        -- O aceite ainda carrega a lore disponível em memória; somente o diário
+        -- sabe se há oferta retida e pode substituí-la por uma referência.
+        local snapshot, code
+        if kind == "QUEST_ACCEPTED" then snapshot, code = Quest.Snapshot(result)
+        else snapshot, code = Quest.ValidateEvent(kind, result) end
         if snapshot and kind == "QUEST_COMPLETED" and offer and offer.quest.id == questID then offer = nil end
         return snapshot, code
     end

@@ -48,7 +48,9 @@ local function validPayload(kind, key, payload)
         return (payload.mapID == nil or integer(payload.mapID, 1, Schema.MAX_SEQUENCE))
             and text(payload.zone) and type(payload.subZone) == "string"
     elseif Quest.IsEvent(kind) then
-        return Quest.ValidateEvent(kind, payload) ~= nil
+        local snapshot = Quest.ValidateStoredEvent(kind, payload)
+        return snapshot ~= nil and (kind ~= "QUEST_ACCEPTED" or not snapshot.offerEventID
+            or snapshot.offerEventID:match("^(Player%-%d+%-%x+):") == key)
     end
     -- Leitura compatível com tipos futuros aditivos. Escrita é restrita abaixo.
     return true
@@ -113,6 +115,8 @@ function Schema.ValidateInput(kind, key, timestamp, payload)
     end
     if Quest.IsEvent(kind) then
         local snapshot = Quest.ValidateEvent(kind, payload)
+        if snapshot and kind == "QUEST_ACCEPTED" and snapshot.offerEventID
+            and snapshot.offerEventID:match("^(Player%-%d+%-%x+):") ~= key then snapshot = nil end
         if not snapshot then return nil, "invalid_input" end
         return snapshot
     end

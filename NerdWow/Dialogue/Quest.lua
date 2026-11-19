@@ -28,6 +28,14 @@ local model = {
     location = { mapID = positive, zone = text, subZone = text },
     chosenReward = item,
 }
+local function eventID(value)
+    if type(value) ~= "string" then return false end
+    local sequence = value:match("^Player%-%d+%-%x+:([1-9]%d*)$")
+    return sequence ~= nil and (#sequence < 16 or (#sequence == 16 and sequence <= "9007199254740990"))
+end
+local accepted = { _required = { moment = true, quest = true },
+    moment = model.moment, quest = model.quest, npc = model.npc, location = model.location,
+    objectives = model.objectives, offerEventID = eventID }
 
 local function copy(value, spec)
     if type(spec) == "function" then
@@ -78,6 +86,9 @@ end
 function Quest.Snapshot(input)
     local snapshot = copy(input, model)
     if not snapshot then return nil, "invalid_dialogue" end
+    -- O log da missão não é fonte confiável de progresso após a entrega.
+    -- Não se transforma uma contagem antiga em uma conclusão inventada.
+    if snapshot.moment == "COMPLETE" then snapshot.objectives = nil end
     if snapshot.chosenReward then
         if snapshot.moment ~= "COMPLETE" or not snapshot.chosenReward.itemID then
             return nil, "invalid_dialogue"
@@ -94,11 +105,51 @@ end
 function Quest.IsEvent(kind) return moments[kind] ~= nil end
 function Quest.Moment(kind) return moments[kind] end
 function Quest.ValidateEvent(kind, input)
-    local snapshot, code = Quest.Snapshot(input)
+    local snapshot, code
+    if kind == "QUEST_ACCEPTED" then
+        snapshot = copy(input, accepted)
+        if snapshot and (input.rewards ~= nil or input.requiredItems ~= nil or input.chosenReward ~= nil
+            or snapshot.quest.progressText ~= nil or snapshot.quest.rewardText ~= nil
+            or (snapshot.offerEventID and (snapshot.quest.description ~= nil or snapshot.quest.objectiveText ~= nil))) then
+            snapshot = nil
+        end
+    else
+        snapshot, code = Quest.Snapshot(input)
+    end
     if not snapshot or snapshot.moment ~= moments[kind] then return nil, code or "invalid_dialogue" end
     return snapshot
 end
+-- Leitura compatível com os aceites completos e objetivos históricos da 0.4.0.
+-- A validação produz cópia; o diário nunca reescreve os eventos carregados.
+function Quest.ValidateStoredEvent(kind, input)
+    local snapshot, code = Quest.Snapshot(input)
+    if not snapshot or snapshot.moment ~= moments[kind] then return nil, code or "invalid_dialogue" end
+    if kind == "QUEST_ACCEPTED" and input.offerEventID ~= nil then
+        if not eventID(input.offerEventID) then return nil, "invalid_dialogue" end
+        snapshot.offerEventID = input.offerEventID
+    end
+    return snapshot
+end
+function Quest.Acceptance(input, reference, offered)
+    local source, code = Quest.Snapshot(input)
+    if not source or source.moment ~= "OFFER" then return nil, code or "invalid_dialogue" end
+    local offer = offered and Quest.Snapshot(offered)
+    if offer and (offer.quest.id ~= source.quest.id or offer.moment ~= "OFFER") then offer = nil end
+    local result = { moment = "OFFER", quest = { id = source.quest.id,
+        title = source.quest.title or (offer and offer.quest.title) }, offerEventID = reference,
+        npc = source.npc or (offer and offer.npc), location = source.location, objectives = source.objectives }
+    if not reference then
+        result.quest.description = source.quest.description or (offer and offer.quest.description)
+        result.quest.objectiveText = source.quest.objectiveText or (offer and offer.quest.objectiveText)
+    end
+    return Quest.ValidateEvent("QUEST_ACCEPTED", result)
+end
 function Quest.Equal(left, right)
     local first, second = Quest.Snapshot(left), Quest.Snapshot(right)
+    return first ~= nil and second ~= nil and equal(first, second)
+end
+function Quest.EqualEvent(kind, left, right)
+    if kind ~= "QUEST_ACCEPTED" then return Quest.Equal(left, right) end
+    local first, second = Quest.ValidateStoredEvent(kind, left), Quest.ValidateStoredEvent(kind, right)
     return first ~= nil and second ~= nil and equal(first, second)
 end

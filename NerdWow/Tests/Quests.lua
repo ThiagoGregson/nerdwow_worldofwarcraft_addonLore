@@ -203,7 +203,7 @@ end)
 test("tabelas secretas de objetivos e ID de evento secreto não são indexados", function()
     local c = client(); c.start()
     c.quest.objectives = c.secret
-    local raw, code = c.namespace.QuestAPI.Read("COMPLETE")
+    local raw, code = c.namespace.QuestAPI.Read("PROGRESS")
     equal(raw.objectives, nil); equal(code, "secret_value")
     local info
     info, code = c.namespace.QuestAPI.EventInfo(c.secret, 0, 0)
@@ -243,7 +243,9 @@ test("aceitar e concluir a mesma missão são eventos distintos do diálogo de r
     equal(c.namespace.QuestDialogs.GetCurrent(), nil)
     c.fire("QUEST_ACCEPTED", 101)
     equal(last(c).type, "QUEST_ACCEPTED")
-    equal(last(c).payload.quest.description, "Recupere a história.")
+    equal(last(c).payload.quest.description, nil)
+    equal(last(c).payload.offerEventID, c.saved().events[3].id)
+    equal(c.saved().events[3].payload.quest.description, "Recupere a história.")
     c.fire("QUEST_PROGRESS")
     equal(last(c).type, "QUEST_PROGRESS_VIEWED")
     local before = #c.saved().events
@@ -361,7 +363,9 @@ test("saída do mundo limpa associação e diário bloqueado não impede modelo 
     equal(c.namespace.QuestDialogs.GetCurrent(), nil)
     c.fire("PLAYER_ENTERING_WORLD")
     c.fire("QUEST_ACCEPTED", 101)
-    equal(last(c).payload.npc, nil)
+    equal(c.namespace.QuestDialogs.ForEvent("QUEST_ACCEPTED", 101).npc, nil)
+    equal(last(c).payload.offerEventID, c.saved().events[3].id)
+    equal(last(c).payload.npc.name, "Arquivista")
     local blocked = client(false); blocked.start()
     blocked.fire("QUEST_DETAIL")
     assert(blocked.namespace.QuestDialogs.GetCurrent())
@@ -444,6 +448,206 @@ test("missões também têm cópia defensiva e não alteram IDs ou retenção", 
     equal(root.events[1].id, A .. ":1"); equal(n.Schema.MAX_EVENTS, 5000)
 end)
 
+test("regressão 29078: modelo COMPLETE não expõe o objetivo antigo 0/6", function()
+    local c = client(); c.start()
+    c.quest.id = 29078
+    c.quest.title = "É hora de reagir"
+    c.quest.objectives = { { text = "0/6 Worg da Rocha Negra", type = "monster",
+        numFulfilled = 0, numRequired = 6, finished = false } }
+    c.fire("QUEST_DETAIL")
+    equal(last(c).payload.objectives[1].fulfilled, 0)
+    c.fire("QUEST_ACCEPTED", 29078)
+    c.fire("QUEST_COMPLETE")
+    equal(c.namespace.QuestDialogs.GetCurrent().objectives, nil)
+    c.env.GetQuestReward(1)
+    c.fire("QUEST_TURNED_IN", 29078, 378, 2000)
+    equal(last(c).type, "QUEST_COMPLETED")
+    equal(last(c).payload.objectives, nil)
+    equal(last(c).payload.chosenReward.itemID, 501)
+    equal(last(c).payload.rewards.experience, 378)
+    equal(last(c).payload.quest.rewardText, "Eles serão lembrados.")
+end)
+
+test("regressão: fallback tardio 0/6 não substitui nem inventa conclusão 6/6", function()
+    local q, session = core().QuestDialogue, core().QuestSession.New()
+    local completed = model("COMPLETE")
+    completed.objectives = { { index = 1, text = "6/6 Worgs", fulfilled = 6, required = 6, finished = true } }
+    local before = serialize(completed)
+    session.Observe(completed)
+    equal(serialize(completed), before)
+    equal(session.GetCurrent().objectives, nil)
+    local fallback = { moment = "COMPLETE", quest = { id = 101 },
+        objectives = { { index = 1, text = "0/6 Worgs", fulfilled = 0, required = 6, finished = false } } }
+    local result = assert(session.ForEvent("QUEST_COMPLETED", 101, fallback))
+    equal(result.objectives, nil)
+    equal(q.Snapshot(fallback).objectives, nil)
+    equal(fallback.objectives[1].fulfilled, 0)
+end)
+
+test("COMPLETE não consulta objetivos do log; oferta e progresso continuam consultando", function()
+    local c = client(); c.start()
+    local calls = 0
+    c.env.C_QuestLog.GetQuestObjectives = function()
+        calls = calls + 1
+        return c.quest.objectives
+    end
+    assert(c.namespace.QuestAPI.Read("COMPLETE"))
+    assert(c.namespace.QuestAPI.ReadLog(101, "COMPLETE"))
+    equal(calls, 0)
+    assert(c.namespace.QuestAPI.Read("OFFER").objectives)
+    assert(c.namespace.QuestAPI.Read("PROGRESS").objectives)
+    equal(calls, 2)
+end)
+
+test("aceite referencia oferta correspondente sem repetir narrativa ou recompensas", function()
+    local c = client(); c.start()
+    c.fire("QUEST_DETAIL")
+    local offered = last(c)
+    local before = serialize(offered)
+    c.fire("QUEST_ACCEPTED", 101)
+    local accepted = last(c).payload
+    equal(accepted.offerEventID, offered.id)
+    equal(accepted.quest.id, 101)
+    equal(accepted.quest.title, c.quest.title)
+    equal(accepted.quest.description, nil); equal(accepted.quest.objectiveText, nil)
+    equal(accepted.rewards, nil); equal(accepted.requiredItems, nil); equal(accepted.chosenReward, nil)
+    equal(accepted.npc.creatureID, 777); equal(accepted.location.mapID, 84)
+    equal(accepted.objectives[1].fulfilled, 1)
+    equal(serialize(offered), before)
+    assert(#serialize(accepted) < #serialize(offered.payload))
+end)
+
+test("oferta retida após reload fornece referência e NPC sem cache de sessão", function()
+    local first = client(); first.start(); first.fire("QUEST_DETAIL")
+    local offeredID = last(first).id
+    local c = client(roundtrip(first.saved())); c.start()
+    equal(c.namespace.QuestDialogs.GetCurrent(), nil)
+    c.npc = { name = "NPC sem relação" }
+    c.fire("QUEST_ACCEPTED", 101)
+    equal(last(c).payload.offerEventID, offeredID)
+    equal(last(c).payload.npc.name, "Arquivista")
+    equal(last(c).payload.quest.description, nil)
+end)
+
+test("referência do aceite distingue personagem, missão e oferta mais recente", function()
+    local n = core()
+    local journal, root = n.Journal.Open(nil)
+    assert(journal.Append("QUEST_OFFERED", A, TIME, model("OFFER", 101)))
+    assert(journal.Append("QUEST_OFFERED", B, TIME, model("OFFER", 101)))
+    assert(journal.Append("QUEST_OFFERED", A, TIME, model("OFFER", 202)))
+    local _, code = journal.Append("QUEST_OFFERED", A, TIME, model("OFFER", 101))
+    equal(code, "duplicate_quest")
+    -- A oferta idêntica foi deduplicada: o último registro de A/101 é o primeiro.
+    assert(journal.Append("QUEST_ACCEPTED", A, TIME, model("OFFER", 101)))
+    equal(root.events[#root.events].payload.offerEventID, root.events[1].id)
+    local changed = model("OFFER", 101); changed.quest.description = "Outra oferta"
+    assert(journal.Append("QUEST_OFFERED", A, TIME, changed))
+    local latest = root.events[#root.events].id
+    assert(journal.Append("QUEST_ACCEPTED", A, TIME, changed))
+    equal(root.events[#root.events].payload.offerEventID, latest)
+end)
+
+test("sem oferta retida o aceite preserva textos conhecidos e remove campos desnecessários", function()
+    local n = core()
+    local journal, root = n.Journal.Open(nil)
+    local source = model("OFFER")
+    source.quest.description = "Única narrativa disponível"
+    source.quest.objectiveText = "Recupere os tomos"
+    source.npc = { name = "Arquivista" }
+    assert(journal.Append("QUEST_ACCEPTED", A, TIME, source))
+    local accepted = root.events[1].payload
+    equal(accepted.offerEventID, nil)
+    equal(accepted.quest.description, source.quest.description)
+    equal(accepted.quest.objectiveText, source.quest.objectiveText)
+    equal(accepted.rewards, nil); equal(accepted.npc.name, "Arquivista")
+    local c = client(); c.start(); c.fire("QUEST_ACCEPTED", 101)
+    equal(last(c).payload.offerEventID, nil)
+    equal(last(c).payload.quest.description, nil)
+    equal(last(c).payload.npc, nil)
+end)
+
+test("oferta descartada pela própria inserção do aceite não produz referência quebrada", function()
+    local n = core()
+    local journal, root = n.Journal.Open(nil)
+    local source = model("OFFER")
+    source.quest.description = "Lore que não pode desaparecer"
+    source.quest.objectiveText = "Objetivo original"
+    assert(journal.Append("QUEST_OFFERED", A, TIME, source))
+    for index = 1, 4999 do
+        assert(journal.Append("LOCATION_CHANGED", A, TIME, { zone = "Zona", subZone = tostring(index) }))
+    end
+    assert(journal.Append("QUEST_ACCEPTED", A, TIME, { moment = "OFFER", quest = { id = 101 } }))
+    local accepted = root.events[#root.events].payload
+    equal(#root.events, 5000); equal(root.droppedEvents, 1)
+    equal(accepted.offerEventID, nil)
+    equal(accepted.quest.description, source.quest.description)
+    equal(accepted.quest.objectiveText, source.quest.objectiveText)
+end)
+
+test("aceite não descarta narrativa nova que a oferta retida não contém", function()
+    local n = core()
+    local journal, root = n.Journal.Open(nil)
+    local old = model("OFFER"); old.quest.description = "Texto anterior"
+    assert(journal.Append("QUEST_OFFERED", A, TIME, old))
+    local current = model("OFFER"); current.quest.description = "Texto ainda não registrado"
+    assert(journal.Append("QUEST_ACCEPTED", A, TIME, current))
+    equal(root.events[2].payload.offerEventID, nil)
+    equal(root.events[2].payload.quest.description, "Texto ainda não registrado")
+end)
+
+test("leitura histórica aceita aceites completos e objetivos contraditórios sem reescrever", function()
+    local n = core()
+    local accepted = model("OFFER")
+    accepted.quest.description = "Descrição histórica"
+    accepted.quest.objectiveText = "Mate 6 Worgs Rocha Negra."
+    local completed = model("COMPLETE")
+    completed.quest.id = 29078
+    completed.objectives = { { index = 1, text = "0/6 Worg da Rocha Negra", kind = "monster",
+        fulfilled = 0, required = 6, finished = false } }
+    local root = { schemaVersion = 1, nextSequence = 3, droppedEvents = 0, events = {
+        { id = A .. ":1", sequence = 1, timestamp = TIME, characterKey = A, type = "QUEST_ACCEPTED", payload = accepted },
+        { id = A .. ":2", sequence = 2, timestamp = TIME, characterKey = A, type = "QUEST_COMPLETED", payload = completed },
+    } }
+    local before = serialize(root)
+    assert(n.Schema.ValidateRoot(root))
+    assert(n.Journal.Open(root))
+    equal(serialize(root), before)
+    equal(root.events[2].payload.objectives[1].fulfilled, 0)
+    equal(root.events[1].payload.rewards.choices[1].itemID, 501)
+end)
+
+test("validador separa escrita enxuta de leitura antiga e verifica referência", function()
+    local n = core()
+    equal(n.Schema.ValidateInput("QUEST_ACCEPTED", A, TIME, model("OFFER")), nil)
+    local accepted = assert(n.QuestDialogue.Acceptance(model("OFFER"), A .. ":38"))
+    assert(n.Schema.ValidateInput("QUEST_ACCEPTED", A, TIME, accepted))
+    accepted.quest.description = "Não repetir com referência"
+    equal(n.Schema.ValidateInput("QUEST_ACCEPTED", A, TIME, accepted), nil)
+    accepted.quest.description = nil
+    for _, reference in ipairs({ false, 38, "invalid", A .. ":0", A .. ":01", A .. ":9007199254740991", B .. ":1" }) do
+        accepted.offerEventID = reference
+        equal(n.Schema.ValidateInput("QUEST_ACCEPTED", A, TIME, accepted), nil)
+    end
+end)
+
+test("aceites novos deduplicam e uma repetição de aceite antigo não duplica o diário", function()
+    local n = core()
+    local journal, root = n.Journal.Open(nil)
+    local source = model("OFFER")
+    source.quest.description = "Descrição"
+    assert(journal.Append("QUEST_OFFERED", A, TIME, source))
+    assert(journal.Append("QUEST_ACCEPTED", A, TIME, source))
+    local sequence = root.nextSequence
+    local _, code = journal.Append("QUEST_ACCEPTED", A, TIME + 1, source)
+    equal(code, "duplicate_quest"); equal(root.nextSequence, sequence)
+    -- Reproduzir um aceite legado já armazenado pela 0.4.0.
+    root.events[2].payload = roundtrip(source)
+    local before = serialize(root)
+    journal = assert(n.Journal.Open(root))
+    _, code = journal.Append("QUEST_ACCEPTED", A, TIME + 2, source)
+    equal(code, "duplicate_quest"); equal(serialize(root), before)
+end)
+
 local estimate
 test("estimativa reproduzível de tamanho para fixtures sintéticas de missão", function()
     local sample = model("COMPLETE")
@@ -454,6 +658,7 @@ test("estimativa reproduzível de tamanho para fixtures sintéticas de missão",
         name = "Arquivista", title = "Guardiã dos registros", faction = "Alliance" }
     sample.objectives = { { index = 1, text = "Recupere os tomos", fulfilled = 3, required = 3, finished = true },
         { index = 2, text = "Leia os nomes", fulfilled = 1, required = 1, finished = true } }
+    sample = assert(core().QuestDialogue.Snapshot(sample))
     local event = { id = A .. ":1", sequence = 1, timestamp = TIME, type = "QUEST_COMPLETED", characterKey = A,
         payload = sample }
     local bytes = #serialize(event)

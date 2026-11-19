@@ -33,6 +33,33 @@ function Journal.Open(saved)
     local journal = {}
 
     function journal.Append(kind, key, timestamp, payload)
+        local offer, reference, offerSequence
+        if kind == "QUEST_ACCEPTED" then
+            local source = addon.QuestDialogue.Snapshot(payload)
+            if not source or source.moment ~= "OFFER" then return nil, "invalid_input" end
+            -- A oferta mais antiga pode desaparecer na própria inserção do aceite.
+            local firstRetained = math.max(1, #root.events - Schema.MAX_EVENTS + 2)
+            for index = #root.events, 1, -1 do
+                local previous = root.events[index]
+                if previous.type == "QUEST_OFFERED" and previous.characterKey == key
+                    and previous.payload.quest.id == source.quest.id then
+                    local narrativeMatches = true
+                    for _, field in ipairs({ "description", "objectiveText" }) do
+                        if source.quest[field] ~= nil and source.quest[field] ~= previous.payload.quest[field] then
+                            narrativeMatches = false
+                        end
+                    end
+                    if narrativeMatches then
+                        offer = previous.payload
+                        offerSequence = previous.sequence
+                        if index >= firstRetained then reference = previous.id end
+                    end
+                    break
+                end
+            end
+            payload = addon.QuestDialogue.Acceptance(source, reference, offer)
+            if not payload then return nil, "invalid_input" end
+        end
         local snapshot, failure = Schema.ValidateInput(kind, key, timestamp, payload)
         if not snapshot then
             return nil, failure
@@ -55,7 +82,15 @@ function Journal.Open(saved)
                 if previous.type == kind and previous.characterKey == key
                     and previous.payload.quest.id == snapshot.quest.id
                     and previous.payload.moment == snapshot.moment then
-                    if addon.QuestDialogue.Equal(previous.payload, snapshot) then
+                    local previousPayload = previous.payload
+                    if kind == "QUEST_ACCEPTED" then
+                        local previousReference = previousPayload.offerEventID
+                        if not previousReference and reference and offerSequence < previous.sequence then
+                            previousReference = reference
+                        end
+                        previousPayload = addon.QuestDialogue.Acceptance(previousPayload, previousReference, offer)
+                    end
+                    if addon.QuestDialogue.EqualEvent(kind, previousPayload, snapshot) then
                         return nil, "duplicate_quest"
                     end
                     break

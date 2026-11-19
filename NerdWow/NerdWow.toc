@@ -2,7 +2,7 @@
 ## Title: NerdWow
 ## Notes: Diário de eventos do personagem para o Nerd-Wow.
 ## Author: Greg
-## Version: 0.4.0
+## Version: 0.4.1
 ## SavedVariables: NerdWow_Journal, NerdWow_Settings
 ## AddonCompartmentFunc: NerdWow_OnAddonCompartmentClick
 

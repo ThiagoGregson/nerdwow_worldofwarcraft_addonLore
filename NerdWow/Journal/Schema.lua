@@ -34,20 +34,25 @@ end
 
 local function validPayload(kind, key, payload)
     if type(payload) ~= "table" then
-        return false
+        return false, "payload"
     end
     if kind == "CHARACTER_CONTEXT" then
-        return payload.guid == key and text(payload.name) and text(payload.realm)
-            and integer(payload.raceID, 1, Schema.MAX_SEQUENCE)
-            and text(payload.race) and text(payload.raceName)
-            and integer(payload.classID, 1, Schema.MAX_SEQUENCE)
-            and text(payload.class) and text(payload.className)
-            and integer(payload.level, 1, Schema.MAX_SEQUENCE)
-            and (payload.faction == "Alliance" or payload.faction == "Horde"
-                or payload.faction == "Neutral")
+        if payload.guid ~= key then return false, "payload.guid" end
+        for _, field in ipairs({ "name", "realm", "race", "raceName", "class", "className" }) do
+            if not text(payload[field]) then return false, "payload." .. field end
+        end
+        for _, field in ipairs({ "raceID", "classID", "level" }) do
+            if not integer(payload[field], 1, Schema.MAX_SEQUENCE) then return false, "payload." .. field end
+        end
+        if payload.faction ~= "Alliance" and payload.faction ~= "Horde" and payload.faction ~= "Neutral" then
+            return false, "payload.faction"
+        end
+        return true
     elseif kind == "LOCATION_CHANGED" then
-        return (payload.mapID == nil or integer(payload.mapID, 1, Schema.MAX_SEQUENCE))
-            and text(payload.zone) and type(payload.subZone) == "string"
+        if payload.mapID ~= nil and not integer(payload.mapID, 1, Schema.MAX_SEQUENCE) then return false, "payload.mapID" end
+        if not text(payload.zone) then return false, "payload.zone" end
+        if type(payload.subZone) ~= "string" then return false, "payload.subZone" end
+        return true
     elseif Gossip.IsEvent(kind) then
         local snapshot = Gossip.ValidateEvent(kind, payload)
         return snapshot ~= nil and (kind ~= "GOSSIP_OPTION_SELECTED"
@@ -113,24 +118,28 @@ end
 -- Retorna uma fotografia dos campos conhecidos; entradas inválidas não têm efeitos.
 function Schema.ValidateInput(kind, key, timestamp, payload)
     if type(kind) ~= "string" or not (payloadFields[kind] or Quest.IsEvent(kind) or Gossip.IsEvent(kind)) then
-        return nil, "unsupported_type"
+        return nil, "unsupported_type", "type"
     end
-    if not characterKey(key) or not integer(timestamp, 1, Schema.MAX_SEQUENCE) then
-        return nil, "invalid_input"
-    end
+    if not characterKey(key) then return nil, "invalid_input", "characterKey" end
+    if not integer(timestamp, 1, Schema.MAX_SEQUENCE) then return nil, "invalid_input", "timestamp" end
     if Gossip.IsEvent(kind) then
-        local snapshot = Gossip.ValidateEvent(kind, payload)
-        if not snapshot or (kind == "GOSSIP_OPTION_SELECTED"
-            and Gossip.ReferenceKey(snapshot.conversationEventID) ~= key) then return nil, "invalid_input" end
+        local snapshot, _, field = Gossip.ValidateEvent(kind, payload)
+        if not snapshot then return nil, "invalid_input", field end
+        if kind == "GOSSIP_OPTION_SELECTED" and Gossip.ReferenceKey(snapshot.conversationEventID) ~= key then
+            return nil, "invalid_input", "payload.conversationEventID"
+        end
         return snapshot
     elseif Quest.IsEvent(kind) then
-        local snapshot = Quest.ValidateEvent(kind, payload)
+        local snapshot, _, field = Quest.ValidateEvent(kind, payload)
         if snapshot and kind == "QUEST_ACCEPTED" and snapshot.offerEventID
-            and snapshot.offerEventID:match("^(Player%-%d+%-%x+):") ~= key then snapshot = nil end
-        if not snapshot then return nil, "invalid_input" end
+            and snapshot.offerEventID:match("^(Player%-%d+%-%x+):") ~= key then
+            return nil, "invalid_input", "payload.offerEventID"
+        end
+        if not snapshot then return nil, "invalid_input", field end
         return snapshot
     end
-    if not validPayload(kind, key, payload) then return nil, "invalid_input" end
+    local valid, field = validPayload(kind, key, payload)
+    if not valid then return nil, "invalid_input", field end
     local snapshot = {}
     for _, field in ipairs(payloadFields[kind]) do
         snapshot[field] = payload[field]

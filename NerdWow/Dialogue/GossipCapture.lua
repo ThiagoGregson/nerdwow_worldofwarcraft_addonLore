@@ -29,11 +29,11 @@ function Capture.New(options)
             moment = "GOSSIP"
         end
         if not moment then return false end
-        local raw, code = api.Read(moment)
+        local raw, code, detail = api.Read(moment)
         options.Issue(code)
-        if not raw then session.Close(); options.Warn(code or "api_unavailable"); return true end
-        local model, token = session.Observe(raw)
-        if not model then options.Warn(token); return true end
+        if not raw then session.Close(); options.Warn(code or "api_unavailable",{captureType="GOSSIP_VIEWED",detail=detail}); return true end
+        local model, token, field = session.Observe(raw)
+        if not model then options.Warn(token,{captureType="GOSSIP_VIEWED",field=field,model=raw,detail=detail}); return true end
         if addon.GossipDialogue.HasContent(model) then
             local id = options.Append("GOSSIP_VIEWED", model)
             if not id then id = options.FindConversation(model) end

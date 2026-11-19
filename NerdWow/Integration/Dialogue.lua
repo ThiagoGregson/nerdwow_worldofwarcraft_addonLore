@@ -5,16 +5,16 @@ local MAX = 9007199254740991
 
 -- Toda comparação/conversão de retornos passa primeiro pela barreira de secretos.
 function Shared.Reader()
-    local failure
+    local failure, detail
     local r = {}
     function r.Plain(value)
-        if issecretvalue and issecretvalue(value) then failure = "secret_value"; return nil end
+        if issecretvalue and issecretvalue(value) then failure, detail = "secret_value", nil; return nil end
         return value
     end
     function r.Call(fn, ...)
         if type(fn) ~= "function" then return nil end
-        local ok, a, b, c, d, e, f, g, h = pcall(fn, ...)
-        if not ok then failure = "api_error"; return nil end
+        local ok, a, b, c, d, e, f, g, h = addon.DiagnosticAPI.Try(fn, ...)
+        if not ok then failure, detail = "api_error", a; return nil end
         return a, b, c, d, e, f, g, h
     end
     function r.Number(value, minimum, maximum)
@@ -34,7 +34,7 @@ function Shared.Reader()
         value = r.Plain(value)
         if type(value) == "table" then return value end
     end
-    function r.Issue() return failure end
+    function r.Issue() return failure, detail end
     function r.Fail(code) failure = failure or code end
     return r
 end

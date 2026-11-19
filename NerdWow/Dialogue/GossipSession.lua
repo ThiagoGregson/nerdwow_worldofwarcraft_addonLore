@@ -13,8 +13,8 @@ function Session.New()
     session.Reset = session.Close
     function session.Observe(input)
         session.Close()
-        local snapshot, code = Gossip.Snapshot(input)
-        if not snapshot then return nil, code end
+        local snapshot, code, field = Gossip.Snapshot(input)
+        if not snapshot then return nil, code, field end
         current = snapshot
         return Gossip.Snapshot(current), generation
     end

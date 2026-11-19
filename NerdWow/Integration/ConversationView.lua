@@ -7,6 +7,7 @@ local handle,root,callbacks,shown,model,speech
 local top,bottom,edgeLeft,edgeRight,crest,crestShadow,name,title,zone,subzone,hint,scroll,child,line,measure,exit
 local buttons={}
 local entrance,bottomHeight,layout=0,0,nil
+local preparing,faulted=false,false
 local function rgb(hex)
     return tonumber(hex:sub(1,2),16)/255,tonumber(hex:sub(3,4),16)/255,tonumber(hex:sub(5,6),16)/255
 end
@@ -23,10 +24,14 @@ local function font(object,file,size)
     object:SetShadowColor(0,0,0,.9)
     object:SetShadowOffset(0,-1)
 end
-local function safe(fn)
+local function dimensions() return addon.DiagnosticAPI.Dimensions(UIParent,root) end
+local function safe(fn,stage)
     return function(...)
-        local ok,value=pcall(fn,...)
-        if not ok and callbacks then pcall(callbacks.Error,value) end
+        local ok,value=addon.DiagnosticAPI.Try(fn,...)
+        if not ok and callbacks then
+            faulted=true
+            pcall(callbacks.Error,value,stage or "view_callback",dimensions())
+        end
         return ok and value
     end
 end
@@ -65,15 +70,18 @@ local function button(index)
 end
 local function place()
     if not shown or not model then return end
-    local width,height=root:GetWidth(),root:GetHeight()
-    layout=assert(addon.Conversation.Layout(width,height))
+    local viewport=dimensions()
+    local width,height=viewport.viewportWidth,viewport.viewportHeight
+    layout=addon.Conversation.Layout(width,height)
+    if not layout then return false end
     local s=layout.scale
     local textWidth=layout.contentWidth-84*s
     local left=(width-layout.contentWidth)/2
     font(name,"Cinzel-Bold",layout.nameSize); color(name,model.theme.glow)
     name:ClearAllPoints(); name:SetWidth(textWidth*.62)
     name:SetText(model.npc and model.npc.name or addon.Text.cinemaUnknownNPC)
-    name:SetWidth(math.min(textWidth*.62,name:GetStringWidth()+2*s))
+    local nameWidth=name:GetStringWidth()
+    if type(nameWidth)=="number" and nameWidth>0 then name:SetWidth(math.min(textWidth*.62,nameWidth+2*s)) end
     font(title,"EBGaramond-Italic",17*s); color(title,model.theme.muted)
     title:SetWidth(textWidth*.35); title:SetText(model.npc and model.npc.title or "")
     title:ClearAllPoints(); title:SetPoint("TOPLEFT",name,"TOPRIGHT",14*s,-3*s)
@@ -153,6 +161,7 @@ local function place()
     line:SetText(speech.GetText())
     local eased=1-(1-math.min(1,entrance/.9))^3
     top:SetHeight(math.max(.01,layout.top*eased)); bottom:SetHeight(math.max(.01,bottomHeight*eased))
+    return true
 end
 local function update(_,delta)
     if entrance<.9 then
@@ -197,26 +206,39 @@ function View.New(newCallbacks)
         if shown and addon.ConversationPlatform.KeyAllowed() and callbacks.Key(key) then root:SetPropagateKeyboardInput(false) end
     end))
     root:SetScript("OnKeyUp",safe(function() root:SetPropagateKeyboardInput(true) end))
-    root:SetScript("OnSizeChanged",safe(place))
+    root:SetScript("OnSizeChanged",safe(function()
+        if not preparing and shown and place()==false then error("layout_unavailable") end
+    end,"OnSizeChanged"))
     root:SetScript("OnShow",safe(function()
-        if shown and model then
-            place()
+        if shown and model and not preparing then
+            if place()==false then error("layout_unavailable") end
             root:EnableKeyboard(true)
             if entrance<.9 or not speech.IsComplete() then root:SetScript("OnUpdate",safe(update)) end
         end
-    end))
-    root:SetScript("OnHide",function() root:SetScript("OnUpdate",nil); root:EnableKeyboard(false) end)
+    end,"OnShow"))
+    root:SetScript("OnHide",safe(function() root:SetScript("OnUpdate",nil); root:EnableKeyboard(false) end,"OnHide"))
     handle={}
     function handle.Show(input)
-        model=input; speech=assert(addon.Conversation.NewSpeech(input.text)); entrance=0; shown=true
-        place(); scroll:SetVerticalScroll(0)
+        faulted=false; preparing=false
+        model=input; speech=assert(addon.Conversation.NewSpeech(input.text)); entrance=0
+        local viewport=dimensions()
+        if not addon.Conversation.Layout(viewport.viewportWidth,viewport.viewportHeight) then
+            shown=false; root:Hide(); return false,"layout_pending",viewport
+        end
+        shown=true; preparing=true
+        root:SetAlpha(0); root:Show(); preparing=false
+        if faulted or not shown then return false,"view_failed",dimensions() end
+        if not place() then return false,"layout_pending",dimensions() end
+        scroll:SetVerticalScroll(0)
         top:SetHeight(.01); bottom:SetHeight(.01)
         for _, object in ipairs({name,title,zone,subzone,hint,crest,crestShadow,scroll,exit}) do object:SetAlpha(0) end
-        root:Show(); root:EnableKeyboard(true); root:SetPropagateKeyboardInput(true)
-        root:SetScript("OnUpdate",safe(update))
+        if faulted or not shown then return false,"view_failed",dimensions() end
+        root:EnableKeyboard(true); root:SetPropagateKeyboardInput(true); root:SetAlpha(1)
+        root:SetScript("OnUpdate",safe(update,"OnUpdate"))
+        return true,nil,dimensions()
     end
     function handle.Hide()
-        shown=false; root:SetScript("OnUpdate",nil); root:EnableKeyboard(false)
+        shown=false; preparing=false; root:SetScript("OnUpdate",nil); root:EnableKeyboard(false)
         root:SetPropagateKeyboardInput(true); root:Hide(); model,speech=nil,nil
     end
     function handle.Complete() if speech then line:SetText(speech.Complete()) end end

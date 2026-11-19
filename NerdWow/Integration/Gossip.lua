@@ -75,13 +75,16 @@ local function read(moment)
         result.activeQuests = greetingQuests(r, true)
     else return nil, "invalid_gossip" end
     if result.text == nil and result.options == nil and result.availableQuests == nil
-        and result.activeQuests == nil then return nil, r.Issue() or "api_unavailable" end
+        and result.activeQuests == nil then
+        local code, detail = r.Issue()
+        return nil, code or "api_unavailable", detail
+    end
     return result, r.Issue()
 end
 function API.Read(moment)
-    local ok, result, code = pcall(read, moment)
-    if not ok then return nil, "api_error" end
-    return result, code
+    local ok, result, code, detail = addon.DiagnosticAPI.Try(read, moment)
+    if not ok then return nil, "api_error", result end
+    return result, code, detail
 end
 function API.Location() return addon.QuestAPI.Location() end
 function API.Defer(callback)

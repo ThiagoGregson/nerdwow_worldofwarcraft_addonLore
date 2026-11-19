@@ -48,8 +48,9 @@ function Journal.Open(saved)
     function journal.Append(kind, key, timestamp, payload)
         local offer, reference, offerSequence
         if kind == "QUEST_ACCEPTED" then
-            local source = addon.QuestDialogue.Snapshot(payload)
-            if not source or source.moment ~= "OFFER" then return nil, "invalid_input" end
+            local source, _, field = addon.QuestDialogue.Snapshot(payload)
+            if not source then return nil, "invalid_input", field end
+            if source.moment ~= "OFFER" then return nil, "invalid_input", "payload.moment" end
             -- A oferta mais antiga pode desaparecer na própria inserção do aceite.
             local firstRetained = math.max(1, #root.events - Schema.MAX_EVENTS + 2)
             for index = #root.events, 1, -1 do
@@ -71,11 +72,11 @@ function Journal.Open(saved)
                 end
             end
             payload = addon.QuestDialogue.Acceptance(source, reference, offer)
-            if not payload then return nil, "invalid_input" end
+            if not payload then return nil, "invalid_input", "payload" end
         end
-        local snapshot, failure = Schema.ValidateInput(kind, key, timestamp, payload)
+        local snapshot, failure, field = Schema.ValidateInput(kind, key, timestamp, payload)
         if not snapshot then
-            return nil, failure
+            return nil, failure, field
         end
         if kind == "GOSSIP_VIEWED" then
             if journal.FindConversation(key, snapshot) then return nil, "duplicate_gossip" end
@@ -95,7 +96,7 @@ function Journal.Open(saved)
                     break
                 end
             end
-            if not matched then return nil, "uncorrelated_gossip" end
+            if not matched then return nil, "uncorrelated_gossip", "payload.conversationEventID" end
         elseif kind == "LOCATION_CHANGED" then
             for index = #root.events, 1, -1 do
                 local previous = root.events[index]
@@ -130,7 +131,7 @@ function Journal.Open(saved)
             end
         end
         if root.nextSequence >= Schema.MAX_SEQUENCE then
-            return nil, "sequence_exhausted"
+            return nil, "sequence_exhausted", "nextSequence"
         end
         local sequence = root.nextSequence
         local id = key .. ":" .. string.format("%.0f", sequence)

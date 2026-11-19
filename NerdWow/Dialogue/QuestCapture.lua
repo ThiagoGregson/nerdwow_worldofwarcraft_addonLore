@@ -18,26 +18,31 @@ function Capture.New(options)
             if not current then return true end
             moment, expectedID = current.moment, current.quest.id
         end
-        local kind, model, failure
+        local kind, model, failure, field, detail
         if moment then
             local raw
-            raw, failure = api.Read(moment)
+            raw, failure, detail = api.Read(moment)
             options.Issue(failure)
             if raw and expectedID and raw.quest.id ~= expectedID then return true end
-            if raw then model, failure = session.Observe(raw) end
-            if not model then session.Close(); options.Warn(failure or "api_unavailable"); return true end
+            if raw then model, failure, field = session.Observe(raw) end
+            if not model then
+                session.Close()
+                options.Warn(failure or "api_unavailable", {captureType=moment=="OFFER" and "QUEST_OFFERED"
+                    or moment=="PROGRESS" and "QUEST_PROGRESS_VIEWED" or nil,field=field or "payload.quest.id",detail=detail,model=raw})
+                return true
+            end
             kind = moment == "OFFER" and "QUEST_OFFERED" or moment == "PROGRESS" and "QUEST_PROGRESS_VIEWED"
         elseif event == "QUEST_ACCEPTED" or event == "QUEST_TURNED_IN" then
             local info
-            info, failure = api.EventInfo(questID, experience, money)
+            info, failure, detail = api.EventInfo(questID, experience, money)
             options.Issue(failure)
-            if not info then options.Warn(failure or "api_unavailable"); return true end
+            if not info then options.Warn(failure or "api_unavailable", {field="payload.quest.id",detail=detail}); return true end
             kind = event == "QUEST_ACCEPTED" and "QUEST_ACCEPTED" or "QUEST_COMPLETED"
             local fallback
-            fallback, failure = api.ReadLog(info.questID, addon.QuestDialogue.Moment(kind))
+            fallback, failure, detail = api.ReadLog(info.questID, addon.QuestDialogue.Moment(kind))
             options.Issue(failure)
-            model, failure = session.ForEvent(kind, info.questID, fallback, api.Location(), info.money, info.experience)
-            if not model then options.Warn(failure or "invalid_dialogue"); return true end
+            model, failure, field = session.ForEvent(kind, info.questID, fallback, api.Location(), info.money, info.experience)
+            if not model then options.Warn(failure or "invalid_dialogue",{captureType=kind,field=field,detail=detail,model=fallback}); return true end
         else return false end
         if kind then options.Append(kind, model) end
         return true

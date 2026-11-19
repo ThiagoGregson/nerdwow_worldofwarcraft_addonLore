@@ -10,23 +10,23 @@ function Settings.Open(saved)
     local root, repaired = saved, {}
     if type(root) ~= "table" then
         root = { schemaVersion = Settings.VERSION, minimapHidden = false, minimapAngle = 225, dialogEnabled = true }
-        repaired[#repaired + 1] = "root"
+        if saved ~= nil then repaired[#repaired + 1] = "root" end
     end
     if root.schemaVersion ~= Settings.VERSION then
+        if root.schemaVersion ~= nil then repaired[#repaired + 1] = "schemaVersion" end
         root.schemaVersion = Settings.VERSION
-        repaired[#repaired + 1] = "schemaVersion"
     end
     if type(root.minimapHidden) ~= "boolean" then
+        if root.minimapHidden ~= nil then repaired[#repaired + 1] = "minimapHidden" end
         root.minimapHidden = false
-        repaired[#repaired + 1] = "minimapHidden"
     end
     if not validAngle(root.minimapAngle) then
+        if root.minimapAngle ~= nil then repaired[#repaired + 1] = "minimapAngle" end
         root.minimapAngle = 225
-        repaired[#repaired + 1] = "minimapAngle"
     end
     if type(root.dialogEnabled) ~= "boolean" then
+        if root.dialogEnabled ~= nil then repaired[#repaired + 1] = "dialogEnabled" end
         root.dialogEnabled = true
-        repaired[#repaired + 1] = "dialogEnabled"
     end
     local handle = {}
     function handle.Get()

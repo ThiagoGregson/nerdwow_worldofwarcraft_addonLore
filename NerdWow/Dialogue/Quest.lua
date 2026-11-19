@@ -37,24 +37,26 @@ local accepted = { _required = { moment = true, quest = true },
     moment = model.moment, quest = model.quest, npc = model.npc, location = model.location,
     objectives = model.objectives, offerEventID = eventID }
 
-local function copy(value, spec)
+local function copy(value, spec, path)
+    path = path or "payload"
     if type(spec) == "function" then
         if spec(value) then return value end
-        return nil
+        return nil, path
     end
-    if type(value) ~= "table" then return nil end
+    if type(value) ~= "table" then return nil, path end
     local result = {}
     if spec._array then
         local length, maximum = 0, 0
         for key in pairs(value) do
-            if not integer(key, 1, Quest.MAX_ENTRIES) then return nil end
+            if not integer(key, 1, Quest.MAX_ENTRIES) then return nil, path end
             length, maximum = length + 1, math.max(maximum, key)
         end
-        if length ~= maximum then return nil end
+        if length ~= maximum then return nil, path end
         local indices = {}
         for index = 1, length do
-            local entry = copy(value[index], spec._array)
-            if not entry or indices[entry.index] then return nil end
+            local entry, field = copy(value[index], spec._array, path .. "[" .. index .. "]")
+            if not entry then return nil, field end
+            if indices[entry.index] then return nil, path .. "[" .. index .. "].index" end
             indices[entry.index] = true
             result[index] = entry
         end
@@ -63,11 +65,11 @@ local function copy(value, spec)
             if field ~= "_required" then
                 local input = value[field]
                 if input ~= nil then
-                    local output = copy(input, rule)
-                    if output == nil then return nil end
+                    local output, failure = copy(input, rule, path .. "." .. field)
+                    if output == nil then return nil, failure end
                     result[field] = output
                 elseif spec._required and spec._required[field] then
-                    return nil
+                    return nil, path .. "." .. field
                 end
             end
         end
@@ -84,41 +86,47 @@ local function equal(left, right)
 end
 
 function Quest.Snapshot(input)
-    local snapshot = copy(input, model)
-    if not snapshot then return nil, "invalid_dialogue" end
+    local snapshot, field = copy(input, model)
+    if not snapshot then return nil, "invalid_dialogue", field end
     -- O log da missão não é fonte confiável de progresso após a entrega.
     -- Não se transforma uma contagem antiga em uma conclusão inventada.
     if snapshot.moment == "COMPLETE" then snapshot.objectives = nil end
     if snapshot.chosenReward then
         if snapshot.moment ~= "COMPLETE" or not snapshot.chosenReward.itemID then
-            return nil, "invalid_dialogue"
+            return nil, "invalid_dialogue", "payload.chosenReward"
         end
         local matched = false
         for _, choice in ipairs(snapshot.rewards and snapshot.rewards.choices or {}) do
             if equal(choice, snapshot.chosenReward) then matched = true; break end
         end
-        if not matched then return nil, "invalid_dialogue" end
+        if not matched then return nil, "invalid_dialogue", "payload.chosenReward" end
     end
     return snapshot
 end
 
 function Quest.IsEvent(kind) return moments[kind] ~= nil end
 function Quest.Moment(kind) return moments[kind] end
-function Quest.SnapshotNPC(input) return copy(input, model.npc) end
-function Quest.SnapshotLocation(input) return copy(input, model.location) end
+function Quest.SnapshotNPC(input) return copy(input, model.npc, "payload.npc") end
+function Quest.SnapshotLocation(input) return copy(input, model.location, "payload.location") end
 function Quest.ValidateEvent(kind, input)
-    local snapshot, code
+    local snapshot, code, field
     if kind == "QUEST_ACCEPTED" then
-        snapshot = copy(input, accepted)
-        if snapshot and (input.rewards ~= nil or input.requiredItems ~= nil or input.chosenReward ~= nil
-            or snapshot.quest.progressText ~= nil or snapshot.quest.rewardText ~= nil
-            or (snapshot.offerEventID and (snapshot.quest.description ~= nil or snapshot.quest.objectiveText ~= nil))) then
-            snapshot = nil
+        snapshot, field = copy(input, accepted)
+        if snapshot then
+            for _, name in ipairs({ "rewards", "requiredItems", "chosenReward" }) do
+                if input[name] ~= nil then return nil, "invalid_dialogue", "payload." .. name end
+            end
+            for _, name in ipairs({ "progressText", "rewardText", "description", "objectiveText" }) do
+                if snapshot.quest[name] ~= nil and (name=="progressText" or name=="rewardText" or snapshot.offerEventID) then
+                    return nil, "invalid_dialogue", "payload.quest." .. name
+                end
+            end
         end
     else
-        snapshot, code = Quest.Snapshot(input)
+        snapshot, code, field = Quest.Snapshot(input)
     end
-    if not snapshot or snapshot.moment ~= moments[kind] then return nil, code or "invalid_dialogue" end
+    if not snapshot then return nil, code or "invalid_dialogue", field end
+    if snapshot.moment ~= moments[kind] then return nil, "invalid_dialogue", "payload.moment" end
     return snapshot
 end
 -- Leitura compatível com os aceites completos e objetivos históricos da 0.4.0.

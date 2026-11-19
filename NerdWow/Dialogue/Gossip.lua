@@ -18,30 +18,33 @@ local optionFields = { index = positive, optionID = positive, orderIndex = count
 local questFields = { index = positive, questID = positive, title = text, isComplete = boolean,
     level = count, isTrivial = boolean, frequency = count, isRepeatable = boolean,
     isLegendary = boolean, isIgnored = boolean, isImportant = boolean, isMeta = boolean, questInfoID = count }
-local function entry(input, fields)
-    if type(input) ~= "table" or not positive(input.index) then return nil end
+local function entry(input, fields, path)
+    path = path or "payload.option"
+    if type(input) ~= "table" then return nil, path end
+    if not positive(input.index) then return nil, path .. ".index" end
     local result = {}
     for name, validate in pairs(fields) do
         local value = input[name]
         if value ~= nil then
-            if not validate(value) then return nil end
+            if not validate(value) then return nil, path .. "." .. name end
             result[name] = value
         end
     end
     return result
 end
-local function array(input, fields)
-    if type(input) ~= "table" then return nil end
+local function array(input, fields, path)
+    if type(input) ~= "table" then return nil, path end
     local length, maximum = 0, 0
     for key in pairs(input) do
-        if not integer(key, 1, Gossip.MAX_ENTRIES) then return nil end
+        if not integer(key, 1, Gossip.MAX_ENTRIES) then return nil, path end
         length, maximum = length + 1, math.max(maximum, key)
     end
-    if length ~= maximum then return nil end
+    if length ~= maximum then return nil, path end
     local result, indices = {}, {}
     for index = 1, length do
-        local value = entry(input[index], fields)
-        if not value or indices[value.index] then return nil end
+        local value, field = entry(input[index], fields, path .. "[" .. index .. "]")
+        if not value then return nil, field end
+        if indices[value.index] then return nil, path .. "[" .. index .. "].index" end
         indices[value.index], result[index] = true, value
     end
     return result
@@ -56,26 +59,29 @@ end
 local function nonblank(value) return type(value) == "string" and value:find("%S") ~= nil end
 function Gossip.Snapshot(input)
     if type(input) ~= "table" or (input.moment ~= "GOSSIP" and input.moment ~= "GREETING") then
-        return nil, "invalid_gossip"
+        return nil, "invalid_gossip", type(input)=="table" and "payload.moment" or "payload"
     end
     local result = { moment = input.moment }
     if input.text ~= nil then
-        if not text(input.text) then return nil, "invalid_gossip" end
+        if not text(input.text) then return nil, "invalid_gossip", "payload.text" end
         result.text = input.text
     end
     for field, fields in pairs({ options = optionFields, availableQuests = questFields, activeQuests = questFields }) do
         if input[field] ~= nil then
-            result[field] = array(input[field], fields)
-            if not result[field] then return nil, "invalid_gossip" end
+            local failure
+            result[field], failure = array(input[field], fields, "payload." .. field)
+            if not result[field] then return nil, "invalid_gossip", failure end
         end
     end
     if input.npc ~= nil then
-        result.npc = Quest.SnapshotNPC(input.npc)
-        if not result.npc then return nil, "invalid_gossip" end
+        local field
+        result.npc, field = Quest.SnapshotNPC(input.npc)
+        if not result.npc then return nil, "invalid_gossip", field end
     end
     if input.location ~= nil then
-        result.location = Quest.SnapshotLocation(input.location)
-        if not result.location then return nil, "invalid_gossip" end
+        local field
+        result.location, field = Quest.SnapshotLocation(input.location)
+        if not result.location then return nil, "invalid_gossip", field end
     end
     return result
 end
@@ -111,24 +117,28 @@ function Gossip.ReferenceKey(value)
 end
 function Gossip.ValidateEvent(kind, input)
     if kind == "GOSSIP_VIEWED" then
-        local snapshot = Gossip.Snapshot(input)
+        local snapshot, code, field = Gossip.Snapshot(input)
+        if not snapshot then return nil, code, field end
         if snapshot and Gossip.HasContent(snapshot) then return snapshot end
+        return nil, "invalid_gossip", "payload.content"
     elseif kind == "GOSSIP_OPTION_SELECTED" and type(input) == "table" then
-        local option = entry(input.option, optionFields)
-        if not Gossip.ReferenceKey(input.conversationEventID) or not option or not nonblank(option.text)
-            or (not option.optionID and option.orderIndex == nil) then return nil, "invalid_gossip" end
+        if not Gossip.ReferenceKey(input.conversationEventID) then return nil, "invalid_gossip", "payload.conversationEventID" end
+        local option, field = entry(input.option, optionFields)
+        if not option then return nil, "invalid_gossip", field end
+        if not nonblank(option.text) then return nil, "invalid_gossip", "payload.option.text" end
+        if not option.optionID and option.orderIndex == nil then return nil, "invalid_gossip", "payload.option.optionID" end
         local result = { conversationEventID = input.conversationEventID, option = option }
         if input.npc ~= nil then
-            result.npc = Quest.SnapshotNPC(input.npc)
-            if not result.npc then return nil, "invalid_gossip" end
+            result.npc, field = Quest.SnapshotNPC(input.npc)
+            if not result.npc then return nil, "invalid_gossip", field end
         end
         if input.location ~= nil then
-            result.location = Quest.SnapshotLocation(input.location)
-            if not result.location then return nil, "invalid_gossip" end
+            result.location, field = Quest.SnapshotLocation(input.location)
+            if not result.location then return nil, "invalid_gossip", field end
         end
         return result
     end
-    return nil, "invalid_gossip"
+    return nil, "invalid_gossip", "payload"
 end
 function Gossip.Selection(model, reference, option)
     return Gossip.ValidateEvent("GOSSIP_OPTION_SELECTED", { conversationEventID = reference,

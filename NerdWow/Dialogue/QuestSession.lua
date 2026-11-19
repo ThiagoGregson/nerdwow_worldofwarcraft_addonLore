@@ -7,8 +7,8 @@ function Session.New()
     local current, offer, completion, selected
     local session = {}
     function session.Observe(input)
-        local snapshot, code = Quest.Snapshot(input)
-        if not snapshot then return nil, code end
+        local snapshot, code, field = Quest.Snapshot(input)
+        if not snapshot then return nil, code, field end
         current = snapshot
         if snapshot.moment == "OFFER" then
             offer, completion, selected = snapshot, nil, nil
@@ -43,9 +43,9 @@ function Session.New()
         if cached and cached.quest.id == questID then result = Quest.Snapshot(cached)
         else result = { moment = moment, quest = { id = questID } } end
         if fallback then
-            local fresh, code = Quest.Snapshot(fallback)
+            local fresh, code, field = Quest.Snapshot(fallback)
             if not fresh or fresh.quest.id ~= questID or fresh.moment ~= moment then
-                return nil, code or "invalid_dialogue"
+                return nil, code or "invalid_dialogue", field or "payload.quest.id"
             end
             for field, value in pairs(fresh.quest) do result.quest[field] = value end
             for _, field in ipairs({ "objectives", "requiredItems", "npc" }) do
@@ -68,11 +68,11 @@ function Session.New()
         end
         -- O aceite ainda carrega a lore disponível em memória; somente o diário
         -- sabe se há oferta retida e pode substituí-la por uma referência.
-        local snapshot, code
-        if kind == "QUEST_ACCEPTED" then snapshot, code = Quest.Snapshot(result)
-        else snapshot, code = Quest.ValidateEvent(kind, result) end
+        local snapshot, code, field
+        if kind == "QUEST_ACCEPTED" then snapshot, code, field = Quest.Snapshot(result)
+        else snapshot, code, field = Quest.ValidateEvent(kind, result) end
         if snapshot and kind == "QUEST_COMPLETED" and offer and offer.quest.id == questID then offer = nil end
-        return snapshot, code
+        return snapshot, code, field
     end
     return session
 end

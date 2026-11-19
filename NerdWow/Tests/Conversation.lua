@@ -177,7 +177,7 @@ test("configuração de diálogo recupera apenas campo inválido e preserva esco
         equal(settings.Get().dialogEnabled,true); equal(root.extra,"guardar"); equal(root.minimapAngle,40)
     end
     local root={schemaVersion=1,minimapHidden=false,minimapAngle=20}
-    local settings,_,repaired=n.Settings.Open(root); equal(repaired[1],"dialogEnabled")
+    local settings,_,repaired=n.Settings.Open(root); equal(#repaired,0)
     equal(settings.ToggleDialog(),false)
     local resumed=n.Settings.Open(t.roundtrip(root)); equal(resumed.Get().dialogEnabled,false)
     local copy=resumed.Get(); copy.dialogEnabled=true; equal(resumed.Get().dialogEnabled,false)
@@ -347,8 +347,14 @@ local function renderer(n)
         function f:SetSize(w,h) self.width,self.height=w,h end
         function f:SetWidth(w) self.width=w end
         function f:SetHeight(h) self.height=h end
-        function f:GetWidth() return self.width or (self.all and self.all:GetWidth()) or (self.parent and self.parent:GetWidth()) or 0 end
-        function f:GetHeight() return self.height or (self.all and self.all:GetHeight()) or (self.parent and self.parent:GetHeight()) or 0 end
+        function f:GetWidth()
+            if self.kind=="Frame" and self.parent and self.parent.kind=="UIParent" and not self.shown then return 0 end
+            return self.width or (self.all and self.all:GetWidth()) or (self.parent and self.parent:GetWidth()) or 0
+        end
+        function f:GetHeight()
+            if self.kind=="Frame" and self.parent and self.parent.kind=="UIParent" and not self.shown then return 0 end
+            return self.height or (self.all and self.all:GetHeight()) or (self.parent and self.parent:GetHeight()) or 0
+        end
         function f:SetAllPoints(target) self.all=target or self.parent end
         function f:ClearAllPoints() self.points={} end
         function f:SetPoint(...) self.points=self.points or {}; self.points[#self.points+1]={...} end
@@ -403,11 +409,14 @@ local function renderer(n)
     local parent=make("UIParent"); parent:SetSize(1280,720)
     state.parent=parent
     local env={type=type,pairs=pairs,ipairs=ipairs,math=math,string=string,tonumber=tonumber,tostring=tostring,
-        pcall=pcall,error=error,assert=assert,UIParent=parent,CreateColor=function(...) return {...} end,
+        pcall=pcall,error=error,assert=assert,UIParent=parent,xpcall=xpcall,unpack=unpack,select=select,setmetatable=setmetatable,
+        debugstack=function() return debug.traceback("stack",2) end,
+        CreateColor=function(...) return {...} end,
         CreateFrame=function(kind,_,frameParent)
             local frame=make(kind,frameParent); state.frames[#state.frames+1]=frame; return frame
         end}
     t.loadModule("Locales/ptBR.lua",n,{})
+    t.loadModule("Integration/Diagnostics.lua",n,env)
     t.loadModule("Integration/ConversationView.lua",n,env)
     return state
 end
@@ -431,6 +440,107 @@ test("renderizador real limita teclado animação e fala ao ciclo da conversa",f
     equal(frame.shown,false); equal(frame.keyboard,false); equal(frame.scripts.OnUpdate,nil)
     equal(p.action,"CloseGossip"); equal(p.root.alpha,.75)
     equal(reports,0)
+end)
+
+test("frame oculto com retângulo zero apresenta usando viewport válido",function()
+    local n=core(); local r=renderer(n); local errors=0
+    local view=n.ConversationView.New({Error=function() errors=errors+1 end})
+    local frame=r.frames[1]
+    equal(frame.shown,false); equal(frame:GetWidth(),0); equal(frame:GetHeight(),0)
+    local ready,code,dimensions=view.Show(assert(n.Conversation.Build(model())))
+    equal(ready,true); equal(code,nil); equal(errors,0)
+    equal(dimensions.viewportWidth,1280); equal(dimensions.viewportHeight,720)
+    equal(frame.shown,true); equal(frame.keyboard,true)
+    view.Hide(); equal(frame:GetWidth(),0); equal(frame.keyboard,false)
+end)
+
+test("viewport indisponível adia três vezes sem tomar controle e registra limite",function()
+    local n=core(); local p=platform(n); local r=renderer(n); local queued,failures={},{}
+    p.api.Defer=function(callback) queued[#queued+1]=callback; return true end
+    r.parent:SetSize(0,0)
+    local c=n.ConversationController.New({GetModel=model,IsEnabled=function() return true end,
+        View=n.ConversationView,Platform=p.api,Try=n.DiagnosticAPI.Try,
+        Diagnose=function(fault,context,source) failures[#failures+1]={fault=fault,context=context,source=source} end,
+        Report=function() end})
+    c.Handle("GOSSIP_SHOW")
+    local attempts=0
+    while #queued>0 do
+        local current=queued; queued={}
+        for _, callback in ipairs(current) do callback(); attempts=attempts+1; assert(attempts<=4) end
+        equal(p.root.alpha,.75)
+    end
+    equal(attempts,4); equal(#failures,1)
+    local failure=failures[1]
+    assert(failure.fault.message:find("layout_unavailable",1,true)); assert(failure.fault.stack)
+    equal(failure.context.viewportWidth,0); equal(failure.context.viewportHeight,0)
+    equal(failure.context.gameEvent,"GOSSIP_SHOW"); equal(failure.source.npc.creatureID,777)
+    local frame=r.frames[1]
+    equal(frame.shown,false); equal(frame.keyboard,false); equal(frame.scripts.OnUpdate,nil)
+    r.parent:SetSize(1920,1080); c.Toggle()
+    for _, callback in ipairs(queued) do callback() end
+    equal(p.root.alpha,0); equal(frame.keyboard,true)
+    c.Close(); equal(p.root.alpha,.75)
+end)
+
+test("viewport resolvido na próxima tentativa retoma sem falha ou chat",function()
+    local n=core(); local p=platform(n); local r=renderer(n); local queued={}; local reports=0
+    p.api.Defer=function(callback) queued[#queued+1]=callback; return true end
+    r.parent:SetSize(0,0)
+    local c=n.ConversationController.New({GetModel=model,IsEnabled=function() return true end,
+        View=n.ConversationView,Platform=p.api,Try=n.DiagnosticAPI.Try,Report=function() reports=reports+1 end})
+    c.Refresh(); equal(#queued,1); equal(p.root.alpha,.75)
+    r.parent:SetSize(1280,720); queued[1]()
+    equal(reports,0); equal(p.root.alpha,0); equal(r.frames[1].keyboard,true)
+end)
+
+test("fallback síncrono dentro de Show impede retomada de teclado e supressão nativa",function()
+    local s=controller(); local diagnosed=0; local took=0
+    s.options.Platform.TakeNative=function() took=took+1 end
+    s.options.Diagnose=function(fault,context)
+        equal(fault,"onshow_original"); equal(context.stage,"OnShow"); diagnosed=diagnosed+1
+    end
+    s.options.View.New=function(callbacks)
+        return {Hide=function() s.visible=false; s.keyboard=false end,
+            Show=function()
+                s.visible=true; s.keyboard=true
+                callbacks.Error("onshow_original","OnShow")
+                return true
+            end}
+    end
+    s.ctrl.Refresh()
+    equal(diagnosed,1); equal(took,0); equal(s.reports,1)
+    equal(s.keyboard,false); equal(s.visible,false)
+end)
+
+test("erro real de callback guarda mensagem stack e dimensões sem propagar",function()
+    local n=core(); local p=platform(n); local r=renderer(n); local captured
+    local c=n.ConversationController.New({GetModel=model,IsEnabled=function() return true end,
+        View=n.ConversationView,Platform=p.api,Try=n.DiagnosticAPI.Try,
+        Diagnose=function(fault,context) captured={fault=fault,context=context} end,Report=function() end})
+    c.Handle("GOSSIP_SHOW")
+    r.regions[1].SetHeight=function() error("render_callback_original") end
+    local frame=r.frames[1]
+    equal(pcall(frame.scripts.OnUpdate,frame,.1),true)
+    assert(captured.fault.message:find("render_callback_original",1,true)); assert(captured.fault.stack)
+    equal(captured.context.gameEvent,"GOSSIP_SHOW"); equal(captured.context.stage,"OnUpdate")
+    equal(captured.context.viewportWidth,1280); equal(captured.context.frameHeight,720)
+    equal(frame.keyboard,false); equal(frame.shown,false); equal(p.root.alpha,.75)
+end)
+
+test("falha de restauração conserva erro original e ainda restaura os demais estados",function()
+    local n=core(); local p=platform(n); renderer(n)
+    p.api.TakeNative("GOSSIP",function() end)
+    local original=p.root.SetAlpha
+    p.root.SetAlpha=function(self,value)
+        if value==.75 then error("restore_alpha_original") end
+        original(self,value)
+    end
+    local ok,fault=n.DiagnosticAPI.Try(p.api.RestoreNative)
+    equal(ok,false); equal(n.DiagnosticAPI.Code(fault),"native_restore_failed")
+    assert(fault.message:find("restore_alpha_original",1,true)); assert(fault.stack)
+    equal(p.root.mouse,true); equal(p.child.mouse,true); equal(p.child.keyboard,true)
+    p.root.SetAlpha=original
+    p.api.RestoreNative(); equal(p.root.alpha,.75)
 end)
 
 test("fonte que não carrega aciona fallback antes de suprimir apresentação nativa",function()

@@ -1,6 +1,7 @@
 local addonName, addon = ...
 local Wow, Text = addon.Wow, addon.Text
 local journal, blockedCode, currentCharacterKey
+local diagnostics, diagnosticCode, currentGameEvent
 local settings, minimap
 local pendingEvents = 0
 local inWorld = false
@@ -30,15 +31,36 @@ local function questIssue(code)
         Wow.Print(string.format(Text.questPartial, reason(code)))
     end
 end
+local captureTypes={ GOSSIP_SHOW="GOSSIP_VIEWED", GOSSIP_OPTIONS_REFRESHED="GOSSIP_VIEWED", QUEST_GREETING="GOSSIP_VIEWED",
+    QUEST_DETAIL="QUEST_OFFERED", QUEST_PROGRESS="QUEST_PROGRESS_VIEWED", QUEST_ACCEPTED="QUEST_ACCEPTED",
+    QUEST_TURNED_IN="QUEST_COMPLETED" }
+local function rejected(code,kind,field,detail,payload,stage)
+    if code=="duplicate_location" or code=="duplicate_quest" or code=="duplicate_gossip" then return end
+    detail=detail or addon.DiagnosticAPI.Capture(code)
+    addon.DiagnosticAPI.Record("capture",code,detail,{gameEvent=currentGameEvent,
+        captureType=kind or captureTypes[currentGameEvent],field=field,stage=stage or "append"},payload)
+end
+local function captureWarning(code,context)
+    context=context or {}
+    rejected(code,context.captureType,context.field,context.detail,context.model,"capture_read")
+    warn(code)
+end
 
 local function append(kind, key, payload)
-    local timestamp, code = Wow.ServerTime()
+    local timestamp, code, field, detail = Wow.ServerTime()
     if timestamp == nil then
+        rejected(code,kind,field,detail,payload,"timestamp")
         warn(code)
         return
     end
-    local id, failure = journal.Append(kind, key, timestamp, payload)
+    local ok, id, failure, path = addon.DiagnosticAPI.Try(journal.Append,kind,key,timestamp,payload)
+    if not ok then
+        rejected("capture_error",kind,nil,id,payload)
+        warn("capture_error")
+        return
+    end
     if not id then
+        rejected(failure,kind,path,nil,payload)
         warn(failure)
     else
         pendingEvents = math.min(pendingEvents + 1, addon.Schema.MAX_EVENTS)
@@ -48,8 +70,9 @@ local function append(kind, key, payload)
 end
 
 local function captureContext()
-    local payload, code = Wow.ReadCharacter()
+    local payload, code, field, detail = Wow.ReadCharacter()
     if not payload then
+        rejected(code,"CHARACTER_CONTEXT",field,detail,nil,"character_read")
         warn(code)
         return
     end
@@ -65,8 +88,9 @@ local function captureLocation()
     if not currentCharacterKey then
         return
     end
-    local payload, code = Wow.ReadLocation()
+    local payload, code, field, detail = Wow.ReadLocation()
     if not payload then
+        rejected(code,"LOCATION_CHANGED",field,detail,nil,"location_read")
         warn(code)
         return
     end
@@ -81,9 +105,9 @@ end
 
 local captures = {
     addon.QuestCapture.New({ Session = questDialogs, API = addon.QuestAPI,
-        Append = appendDialogue, Warn = warn, Issue = questIssue }),
+        Append = appendDialogue, Warn = captureWarning, Issue = questIssue }),
     addon.GossipCapture.New({ Session = gossipDialogs, API = addon.GossipAPI,
-        Append = appendDialogue, Warn = warn,
+        Append = appendDialogue, Warn = captureWarning,
         Issue = function(code)
             if code and not warnings["gossip_" .. code] then
                 warnings["gossip_" .. code] = true
@@ -104,7 +128,11 @@ dialogueEvents[#dialogueEvents + 1] = "PLAYER_REGEN_DISABLED"
 local cinema = addon.ConversationController.New({ GetModel = gossipDialogs.GetCurrent,
     IsEnabled = function() return interfaceInWorld and settings and settings.Get().dialogEnabled end,
     Platform = addon.ConversationPlatform, View = addon.ConversationView,
-    Report = function(code) Wow.Print(string.format(Text.cinemaFailure,reason(code))) end })
+    Try = addon.DiagnosticAPI.Try,
+    Diagnose = function(fault,context,model)
+        addon.DiagnosticAPI.Record("interface",addon.DiagnosticAPI.Code(fault),fault,context,model)
+    end,
+    Report = function(fault) Wow.Print(string.format(Text.cinemaFailure,reason(addon.DiagnosticAPI.Code(fault)))) end })
 
 local function tooltip()
     local view = { version = Wow.Version() }
@@ -123,6 +151,22 @@ Wow.RegisterCommand(function(message)
     local argument = (message or ""):match("^%s*(.-)%s*$"):lower()
     if argument == "sincronizar" then
         Wow.RequestSync()
+        return
+    end
+    if argument == "diagnostico" then
+        if not diagnostics then Wow.Print(string.format(Text.diagnosticsBlocked,reason(diagnosticCode or "not_initialized"))); return end
+        local recent=diagnostics.Recent(5)
+        Wow.Print(string.format(Text.diagnosticsHeader,diagnostics.GetStatus().total))
+        if #recent==0 then Wow.Print(Text.diagnosticsEmpty) end
+        for _, entry in ipairs(recent) do
+            local context=entry.context
+            local function value(v) return addon.DiagnosticAPI.ChatText(v or Text.unavailable) end
+            local description=addon.DiagnosticAPI.ChatText(entry.message or Text.diagnosticsRedacted)
+            Wow.Print(string.format(Text.diagnosticsLine,entry.lastTimestamp and Wow.FormatTime(entry.lastTimestamp) or Text.noTime,
+                value(entry.code),entry.count,value(context.gameEvent),value(context.captureType or context.moment),
+                value(context.field or context.stage),context.creatureID and tostring(context.creatureID) or "?",
+                value(entry.version),description))
+        end
         return
     end
     if argument == "botao" then
@@ -157,11 +201,18 @@ Wow.RegisterCommand(function(message)
 end)
 
 Wow.Listen(function(event, loadedName, experience, money)
+    currentGameEvent=event
     if event == "ADDON_LOADED" then
         if loadedName ~= addonName or initialized then
             return
         end
         initialized = true
+        local diagnosticRoot
+        diagnostics,diagnosticRoot,diagnosticCode=addon.Diagnostics.Open(addon.database.ReadDiagnostics())
+        if diagnostics then
+            addon.database.BindDiagnostics(diagnosticRoot)
+            addon.DiagnosticAPI.Bind(diagnostics.Append)
+        end
         local settingsRoot, repaired
         settings, settingsRoot, repaired = addon.Settings.Open(addon.database.ReadSettings())
         addon.database.BindSettings(settingsRoot)
@@ -179,6 +230,7 @@ Wow.Listen(function(event, loadedName, experience, money)
                 Wow.Print(string.format(Text.retention, status.droppedEvents, addon.Schema.MAX_EVENTS))
             end
         else
+            rejected(blockedCode,nil,"journal",nil,nil,"open")
             Wow.Print(string.format(Text.blocked, reason(blockedCode)))
         end
         minimap = addon.MinimapUI.Create({ GetSettings = settings.Get, SetAngle = settings.SetAngle,

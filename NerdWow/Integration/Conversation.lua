@@ -17,16 +17,29 @@ function Platform.CanPresent()
 end
 function Platform.RestoreNative()
     activeRoot,notify=nil,nil
-    local remaining={}
+    local remaining,failures={},{}
+    local api=addon.DiagnosticAPI
+    local attempt=api and api.Try or pcall
+    local function restore(fn,frame,value)
+        local ok,fault=attempt(fn,frame,value)
+        if not ok then failures[#failures+1]=fault end
+        return ok
+    end
     for _, state in ipairs(states) do
         local ok=true
-        if state.alpha~=nil then ok=pcall(state.frame.SetAlpha,state.frame,state.alpha) and ok end
-        if state.mouse~=nil then ok=pcall(state.frame.EnableMouse,state.frame,state.mouse) and ok end
-        if state.keyboard~=nil then ok=pcall(state.frame.EnableKeyboard,state.frame,state.keyboard) and ok end
+        if state.alpha~=nil then ok=restore(state.frame.SetAlpha,state.frame,state.alpha) and ok end
+        if state.mouse~=nil then ok=restore(state.frame.EnableMouse,state.frame,state.mouse) and ok end
+        if state.keyboard~=nil then ok=restore(state.frame.EnableKeyboard,state.frame,state.keyboard) and ok end
         if not ok then remaining[#remaining+1]=state end
     end
     states=remaining
-    if #remaining>0 then error("native_restore_failed") end
+    if #remaining>0 then
+        if api then
+            for index=2,#failures do api.Record("interface","native_restore_failed",failures[index],{stage="restore"}) end
+            api.Raise(failures[1],"native_restore_failed")
+        end
+        error("native_restore_failed")
+    end
 end
 function Platform.TakeNative(moment,onShow)
     if not Platform.CanPresent() then error("combat_interface") end

@@ -15,4 +15,10 @@ addon.database = {
     BindSettings = function(root)
         NerdWow_Settings = root
     end,
+    ReadDiagnostics = function()
+        return NerdWow_Diagnostics
+    end,
+    BindDiagnostics = function(root)
+        NerdWow_Diagnostics = root
+    end,
 }

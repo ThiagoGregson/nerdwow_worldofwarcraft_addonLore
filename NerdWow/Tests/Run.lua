@@ -30,6 +30,7 @@ local function core()
     loadModule("Interface/ConversationController.lua", namespace, environment)
     loadModule("Journal/Schema.lua", namespace, environment)
     loadModule("Journal/Journal.lua", namespace, environment)
+    loadModule("Diagnostics/Diagnostics.lua", namespace, environment)
     loadModule("Configuration/Settings.lua", namespace, environment)
     loadModule("Minimap/Button.lua", namespace, environment)
     return namespace
@@ -338,6 +339,9 @@ local function client(saved, settings, absentSettings)
         NerdWow_Journal = saved, NerdWow_Settings = settings, type = type, pairs = pairs, ipairs = ipairs,
         math = math, string = string, pcall = pcall, tonumber = tonumber,
         table = table, error = error, assert = assert, tostring = tostring,
+        xpcall = xpcall, unpack = unpack, select = select, setmetatable = setmetatable,
+        debugstack = function() return debug.traceback("stack",2) end,
+        time = function() return TIME end,
         SlashCmdList = {}, date = os.date, StaticPopupDialogs = {},
         UIParent = false,
     }
@@ -514,7 +518,7 @@ local function client(saved, settings, absentSettings)
         return frame
     end
     setmetatable(env, { __index = function(_, key)
-        if key == "NerdWow_Journal" or key == "NerdWow_Settings" then return nil end
+        if key == "NerdWow_Journal" or key == "NerdWow_Settings" or key == "NerdWow_Diagnostics" then return nil end
         error("API não simulada: " .. key)
     end })
     local namespace = {}
@@ -538,6 +542,7 @@ local function client(saved, settings, absentSettings)
     end
     state.saved = function() return env.NerdWow_Journal end
     state.settings = function() return env.NerdWow_Settings end
+    state.diagnostics = function() return env.NerdWow_Diagnostics end
     state.buttonEvent = function(name, ...)
         local callback = state.button.scripts[name]
         if callback then callback(state.button, ...) end
@@ -556,9 +561,9 @@ test("metadados e carregamento real do TOC", function()
     equal(metadata.Interface, "120105")
     equal(metadata.Title, "NerdWow")
     equal(metadata.Author, "Greg")
-    equal(metadata.Version, "0.6.0")
-    equal(metadata.SavedVariables, "NerdWow_Journal, NerdWow_Settings")
-    equal(#order, 23)
+    equal(metadata.Version, "0.6.1")
+    equal(metadata.SavedVariables, "NerdWow_Journal, NerdWow_Settings, NerdWow_Diagnostics")
+    equal(#order, 25)
     for _, path in ipairs(order) do assert(not path:find("Tests/", 1, true)) end
     local c = client()
     equal(c.env.SLASH_NERDWOW1, "/nerdwow")
@@ -593,7 +598,7 @@ test("entrada, status pt-BR e ajuda", function()
     equal(events[2].type, "LOCATION_CHANGED")
     equal(events[2].timestamp, TIME)
     c.command()
-    assert(c.messages[1]:find("v0.6.0 | esquema 1 | 2 eventos", 1, true))
+    assert(c.messages[1]:find("v0.6.1 | esquema 1 | 2 eventos", 1, true))
     assert(c.messages[1]:find("mudança de local", 1, true))
     assert(c.messages[1]:find("UTC", 1, true))
     assert(c.messages[2]:find("/reload", 1, true))
@@ -847,7 +852,7 @@ test("configuração ausente ou de tipo errado recebe padrões sem API do jogo",
     end
     local _, root, repaired = settings.Open(nil)
     equal(root.minimapAngle, 225)
-    equal(repaired[1], "root")
+    equal(#repaired, 0)
 end)
 
 test("configuração válida preserva extras e Get devolve uma cópia", function()
@@ -895,8 +900,7 @@ test("campos ausentes e todos os limites de ângulo recuperam só o necessário"
         local root = { schemaVersion = 1, minimapHidden = true, minimapAngle = 0 , dialogEnabled = true}
         root[field] = nil
         local _, _, repaired = core().Settings.Open(root)
-        equal(#repaired, 1)
-        equal(repaired[1], field)
+        equal(#repaired, 0)
     end
     for _, angle in ipairs({ 0, 359.999 }) do
         local _, root, repaired = core().Settings.Open({ schemaVersion = 1, minimapHidden = false, minimapAngle = angle , dialogEnabled = true})
@@ -1111,7 +1115,7 @@ test("dica mostra versão, totais, pendentes, UTC e instruções em pt-BR", func
     local c = client()
     c.start()
     local text = tooltipText(c)
-    for _, expected in ipairs({ "NerdWow v0.6.0", "Eventos no diário: 2",
+    for _, expected in ipairs({ "NerdWow v0.6.1", "Eventos no diário: 2",
         "Novos desta sessão aguardando gravação: 2", "Último evento:", "UTC",
         "Clique esquerdo: sincronizar", "Arraste com o botão esquerdo" }) do
         assert(text:find(expected, 1, true), expected)
@@ -1180,8 +1184,7 @@ test("configuração inválida avisa e preserva diário e valores válidos", fun
     local first = client(nil, nil, true)
     first.fire("ADDON_LOADED", "NerdWow")
     equal(first.settings().schemaVersion, 1)
-    equal(#first.messages, 1)
-    assert(first.messages[1]:find("raiz", 1, true))
+    equal(#first.messages, 0)
 end)
 
 local questSuite = assert(loadstring(sources["Tests/Quests.lua"], "@Tests/Quests.lua"))
@@ -1193,5 +1196,7 @@ gossipSuite({ test = test, equal = equal, core = core, client = client,
 local interfaceSuite = assert(loadstring(sources["Tests/Conversation.lua"], "@Tests/Conversation.lua"))
 interfaceSuite({ test = test, equal = equal, core = core, client = client, loadModule = loadModule,
     roundtrip = roundtrip, serialize = serialize })
+local diagnosticsSuite = assert(loadstring(sources["Tests/Diagnostics.lua"], "@Tests/Diagnostics.lua"))
+diagnosticsSuite({ test = test, equal = equal, core = core, client = client, serialize = serialize, roundtrip = roundtrip })
 return string.format("%d cenários aprovados; runtime: %s / %s. Integração real no Retail pendente.\n%s",
     passed, _VERSION, jit and jit.version or "sem JIT", estimate)

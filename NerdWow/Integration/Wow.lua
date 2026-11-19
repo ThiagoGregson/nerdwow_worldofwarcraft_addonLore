@@ -8,9 +8,8 @@ end
 
 local function readCharacter()
     local name, realm = UnitName("player")
-    if secret(name) or secret(realm) then
-        return nil, "secret_value"
-    end
+    if secret(name) then return nil, "secret_value", "payload.name" end
+    if secret(realm) then return nil, "secret_value", "payload.realm" end
     if realm == nil or realm == "" then
         realm = GetRealmName()
     end
@@ -22,10 +21,14 @@ local function readCharacter()
         className = className, class = class, classID = classID,
         level = UnitLevel("player"), faction = UnitFactionGroup("player"),
     }
-    for _, value in pairs(payload) do
+    for field, value in pairs(payload) do
         if secret(value) then
-            return nil, "secret_value"
+            return nil, "secret_value", "payload." .. field
         end
+    end
+    for _, field in ipairs({ "guid", "name", "realm", "raceName", "race", "raceID",
+        "className", "class", "classID", "level", "faction" }) do
+        if payload[field] == nil or payload[field] == "" then return nil, "api_unavailable", "payload." .. field end
     end
     return payload
 end
@@ -35,20 +38,22 @@ local function readLocation()
         mapID = C_Map.GetBestMapForUnit("player"),
         zone = GetZoneText(), subZone = GetSubZoneText(),
     }
-    for _, value in pairs(payload) do
+    for field, value in pairs(payload) do
         if secret(value) then
-            return nil, "secret_value"
+            return nil, "secret_value", "payload." .. field
         end
     end
+    if payload.zone == nil or payload.zone == "" then return nil, "api_unavailable", "payload.zone" end
+    if payload.subZone == nil then return nil, "api_unavailable", "payload.subZone" end
     return payload
 end
 
 local function readSafely(reader)
-    local ok, value, code = pcall(reader)
+    local ok, value, code, field = addon.DiagnosticAPI.Try(reader)
     if not ok then
-        return nil, "api_error"
+        return nil, "api_error", nil, value
     end
-    return value, code
+    return value, code, field
 end
 
 function Wow.ReadCharacter()
@@ -60,15 +65,15 @@ function Wow.ReadLocation()
 end
 
 function Wow.ServerTime()
-    local ok, value = pcall(GetServerTime)
+    local ok, value = addon.DiagnosticAPI.Try(GetServerTime)
     if not ok then
-        return nil, "api_error"
+        return nil, "api_error", "timestamp", value
     end
     if secret(value) then
-        return nil, "secret_value"
+        return nil, "secret_value", "timestamp"
     end
     if value == nil then
-        return nil, "api_unavailable"
+        return nil, "api_unavailable", "timestamp"
     end
     return value
 end

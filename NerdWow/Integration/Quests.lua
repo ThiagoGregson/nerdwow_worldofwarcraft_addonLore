@@ -48,7 +48,7 @@ end
 function API.Read(moment)
     local r = reader()
     local questID = r.Number(r.Call(GetQuestID), 1)
-    if not questID then return nil, r.Issue() or "api_unavailable" end
+    if not questID then local code, detail = r.Issue(); return nil, code or "api_unavailable", detail end
     local result = { moment = moment, quest = { id = questID, title = r.String(r.Call(GetTitleText)) },
         npc = addon.DialogueAPI.ReadNPC(r), location = API.Location() }
     if moment ~= "COMPLETE" then result.objectives = objectives(r, questID) end
@@ -75,7 +75,7 @@ end
 function API.ReadLog(questID, moment)
     local r = reader()
     questID = r.Number(questID, 1)
-    if not questID then return nil, r.Issue() or "api_unavailable" end
+    if not questID then local code, detail = r.Issue(); return nil, code or "api_unavailable", detail end
     local result = { moment = moment, quest = { id = questID,
         title = r.String(r.Call(C_QuestLog.GetTitleForQuestID, questID)) } }
     if moment ~= "COMPLETE" then result.objectives = objectives(r, questID) end
@@ -85,7 +85,7 @@ end
 function API.EventInfo(questID, experience, money)
     local r = reader()
     questID = r.Number(questID, 1)
-    if not questID then return nil, r.Issue() or "api_unavailable" end
+    if not questID then local code, detail = r.Issue(); return nil, code or "api_unavailable", detail end
     return { questID = questID, experience = r.Number(experience, 0), money = r.Number(money, 0) }, r.Issue()
 end
 

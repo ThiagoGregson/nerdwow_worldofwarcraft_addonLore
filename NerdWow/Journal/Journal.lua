@@ -32,6 +32,19 @@ function Journal.Open(saved)
     retain(root)
     local journal = {}
 
+    function journal.FindConversation(key, input)
+        local model = addon.GossipDialogue.Snapshot(input)
+        if not model or not model.npc or not model.npc.creatureID then return nil end
+        for index = #root.events, 1, -1 do
+            local event = root.events[index]
+            if event.type == "GOSSIP_VIEWED" and event.characterKey == key
+                and event.payload.npc and event.payload.npc.creatureID == model.npc.creatureID then
+                if addon.GossipDialogue.EqualConversation(event.payload, model) then return event.id end
+                return nil
+            end
+        end
+    end
+
     function journal.Append(kind, key, timestamp, payload)
         local offer, reference, offerSequence
         if kind == "QUEST_ACCEPTED" then
@@ -64,7 +77,26 @@ function Journal.Open(saved)
         if not snapshot then
             return nil, failure
         end
-        if kind == "LOCATION_CHANGED" then
+        if kind == "GOSSIP_VIEWED" then
+            if journal.FindConversation(key, snapshot) then return nil, "duplicate_gossip" end
+        elseif kind == "GOSSIP_OPTION_SELECTED" then
+            local matched = false
+            -- O alvo precisa estar presente e sobreviver à inserção do evento.
+            local firstRetained = math.max(1, #root.events - Schema.MAX_EVENTS + 2)
+            for index = #root.events, firstRetained, -1 do
+                local event = root.events[index]
+                if event.id == snapshot.conversationEventID and event.type == "GOSSIP_VIEWED"
+                    and event.characterKey == key and event.payload.moment == "GOSSIP"
+                    and event.payload.npc and snapshot.npc and snapshot.npc.creatureID
+                    and snapshot.npc.creatureID == event.payload.npc.creatureID then
+                    for _, option in ipairs(event.payload.options or {}) do
+                        if addon.GossipDialogue.EqualOption(option, snapshot.option) then matched = true end
+                    end
+                    break
+                end
+            end
+            if not matched then return nil, "uncorrelated_gossip" end
+        elseif kind == "LOCATION_CHANGED" then
             for index = #root.events, 1, -1 do
                 local previous = root.events[index]
                 if previous.type == kind and previous.characterKey == key then

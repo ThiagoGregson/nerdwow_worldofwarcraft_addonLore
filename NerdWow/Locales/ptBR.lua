@@ -28,6 +28,7 @@ addon.Text = {
     blocked = "Gravação suspensa: %s. Os dados existentes foram preservados.",
     captureFailed = "Evento não registrado: %s.",
     questPartial = "Diálogo de missão lido com campos indisponíveis: %s.",
+    gossipPartial = "Conversa lida com campos indisponíveis: %s.",
     retention = "Retenção aplicada; %d eventos descartados no total (limite: %d).",
     eventTypes = {
         CHARACTER_CONTEXT = "contexto do personagem",
@@ -36,6 +37,8 @@ addon.Text = {
         QUEST_ACCEPTED = "missão aceita",
         QUEST_PROGRESS_VIEWED = "progresso da missão visto",
         QUEST_COMPLETED = "missão concluída",
+        GOSSIP_VIEWED = "conversa vista",
+        GOSSIP_OPTION_SELECTED = "opção de conversa escolhida",
     },
     errors = {
         invalid_root = "raiz do diário ausente ou inválida",
@@ -51,5 +54,7 @@ addon.Text = {
         secret_value = "dados restritos do jogo indisponíveis para captura",
         not_initialized = "diário ainda não inicializado",
         invalid_dialogue = "modelo de diálogo de missão inválido",
+        invalid_gossip = "modelo de conversa inválido",
+        uncorrelated_gossip = "opção sem conversa correspondente segura",
     },
 }

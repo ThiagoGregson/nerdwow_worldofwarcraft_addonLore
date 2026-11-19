@@ -9,6 +9,7 @@ local Schema = {
 }
 addon.Schema = Schema
 local Quest = addon.QuestDialogue
+local Gossip = addon.GossipDialogue
 
 local payloadFields = {
     CHARACTER_CONTEXT = {
@@ -47,6 +48,10 @@ local function validPayload(kind, key, payload)
     elseif kind == "LOCATION_CHANGED" then
         return (payload.mapID == nil or integer(payload.mapID, 1, Schema.MAX_SEQUENCE))
             and text(payload.zone) and type(payload.subZone) == "string"
+    elseif Gossip.IsEvent(kind) then
+        local snapshot = Gossip.ValidateEvent(kind, payload)
+        return snapshot ~= nil and (kind ~= "GOSSIP_OPTION_SELECTED"
+            or Gossip.ReferenceKey(snapshot.conversationEventID) == key)
     elseif Quest.IsEvent(kind) then
         local snapshot = Quest.ValidateStoredEvent(kind, payload)
         return snapshot ~= nil and (kind ~= "QUEST_ACCEPTED" or not snapshot.offerEventID
@@ -107,13 +112,18 @@ end
 
 -- Retorna uma fotografia dos campos conhecidos; entradas inválidas não têm efeitos.
 function Schema.ValidateInput(kind, key, timestamp, payload)
-    if type(kind) ~= "string" or not (payloadFields[kind] or Quest.IsEvent(kind)) then
+    if type(kind) ~= "string" or not (payloadFields[kind] or Quest.IsEvent(kind) or Gossip.IsEvent(kind)) then
         return nil, "unsupported_type"
     end
     if not characterKey(key) or not integer(timestamp, 1, Schema.MAX_SEQUENCE) then
         return nil, "invalid_input"
     end
-    if Quest.IsEvent(kind) then
+    if Gossip.IsEvent(kind) then
+        local snapshot = Gossip.ValidateEvent(kind, payload)
+        if not snapshot or (kind == "GOSSIP_OPTION_SELECTED"
+            and Gossip.ReferenceKey(snapshot.conversationEventID) ~= key) then return nil, "invalid_input" end
+        return snapshot
+    elseif Quest.IsEvent(kind) then
         local snapshot = Quest.ValidateEvent(kind, payload)
         if snapshot and kind == "QUEST_ACCEPTED" and snapshot.offerEventID
             and snapshot.offerEventID:match("^(Player%-%d+%-%x+):") ~= key then snapshot = nil end

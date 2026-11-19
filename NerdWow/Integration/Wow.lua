@@ -128,7 +128,7 @@ function NerdWow_OnAddonCompartmentClick()
     Wow.RequestSync()
 end
 
-function Wow.Listen(callback)
+function Wow.Listen(callback, dialogueEvents)
     -- Frame sem nome e sem elementos visuais; usado apenas como receptor de eventos.
     local frame = CreateFrame("Frame")
     frame:SetScript("OnEvent", function(_, event, ...)
@@ -136,8 +136,8 @@ function Wow.Listen(callback)
     end)
     for _, event in ipairs({ "ADDON_LOADED", "PLAYER_ENTERING_WORLD",
         "PLAYER_LEAVING_WORLD", "ZONE_CHANGED", "ZONE_CHANGED_INDOORS",
-        "ZONE_CHANGED_NEW_AREA", "QUEST_DETAIL", "QUEST_PROGRESS", "QUEST_COMPLETE",
-        "QUEST_ACCEPTED", "QUEST_TURNED_IN", "QUEST_FINISHED", "QUEST_ITEM_UPDATE" }) do
+        "ZONE_CHANGED_NEW_AREA" }) do
         frame:RegisterEvent(event)
     end
+    for _, event in ipairs(dialogueEvents or {}) do frame:RegisterEvent(event) end
 end

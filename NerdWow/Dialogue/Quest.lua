@@ -104,6 +104,8 @@ end
 
 function Quest.IsEvent(kind) return moments[kind] ~= nil end
 function Quest.Moment(kind) return moments[kind] end
+function Quest.SnapshotNPC(input) return copy(input, model.npc) end
+function Quest.SnapshotLocation(input) return copy(input, model.location) end
 function Quest.ValidateEvent(kind, input)
     local snapshot, code
     if kind == "QUEST_ACCEPTED" then

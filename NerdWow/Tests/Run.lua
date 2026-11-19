@@ -23,6 +23,8 @@ local function core()
     })
     loadModule("Dialogue/Quest.lua", namespace, environment)
     loadModule("Dialogue/QuestSession.lua", namespace, environment)
+    loadModule("Dialogue/Gossip.lua", namespace, environment)
+    loadModule("Dialogue/GossipSession.lua", namespace, environment)
     loadModule("Journal/Schema.lua", namespace, environment)
     loadModule("Journal/Journal.lua", namespace, environment)
     loadModule("Configuration/Settings.lua", namespace, environment)
@@ -321,6 +323,11 @@ local function client(saved, settings, absentSettings)
         money = 120, experience = 450 }
     state.npc = { guid = "Creature-0-123-0-84-777-ABC", name = "Arquivista", faction = "Alliance",
         subtitle = "<Guardiã dos registros>" }
+    state.gossip = { text = "Bem-vindo ao arquivo.",
+        options = { { gossipOptionID = 7001, orderIndex = 0, name = "Conte-me sua história.", icon = 134400, status = 0, flags = 0 } },
+        available = { { questID = 101, title = "Os nomes nas margens", isImportant = true, questInfoID = 0 } },
+        active = { { questID = 202, title = "Um registro antigo", isComplete = false, isTrivial = true } } }
+    state.timers = {}
     if settings == nil and not absentSettings then
         settings = { schemaVersion = 1, minimapHidden = false, minimapAngle = 225 }
     end
@@ -383,10 +390,40 @@ local function client(saved, settings, absentSettings)
         return item.name, item.icon, item.quantity, item.quality, true, item.itemID
     end
     env.GetQuestItemLink = function(kind, index) return questItems(kind)[index].link end
-    env.hooksecurefunc = function(name, callback) equal(name, "GetQuestReward"); state.rewardHook = callback end
+    env.hooksecurefunc = function(object, name, callback)
+        if type(object) == "string" then
+            equal(object, "GetQuestReward"); state.rewardHook = name; return
+        end
+        local original = object[name]
+        object[name] = function(...) original(...); callback(...) end
+    end
     env.GetQuestReward = function(index)
         if state.rewardHook then state.rewardHook(index) end
     end
+    env.C_Timer = { After = function(delay, callback)
+        equal(delay, 0); state.timers[#state.timers + 1] = callback
+    end }
+    env.C_GossipInfo = {
+        GetText = function() return state.gossip.text end,
+        GetOptions = function() return state.gossip.options end,
+        GetAvailableQuests = function() return state.gossip.available end,
+        GetActiveQuests = function() return state.gossip.active end,
+        SelectOption = function(...) if state.selectionEffect then state.selectionEffect(...) end end,
+        SelectOptionByIndex = function(...) if state.selectionEffect then state.selectionEffect(...) end end,
+    }
+    env.GetGreetingText = function() return state.gossip.text end
+    env.GetNumAvailableQuests = function() return #state.gossip.available end
+    env.GetAvailableTitle = function(index) return state.gossip.available[index].title end
+    env.GetAvailableQuestInfo = function(index)
+        local q = state.gossip.available[index]
+        return q.isTrivial, q.frequency, q.repeatable, q.isLegendary, q.questID, q.isImportant, q.isMeta, q.questInfoID
+    end
+    env.GetNumActiveQuests = function() return #state.gossip.active end
+    env.GetActiveTitle = function(index)
+        local q = state.gossip.active[index]; return q.title, q.isComplete
+    end
+    env.GetActiveQuestID = function(index) return state.gossip.active[index].questID end
+    env.IsActiveQuestTrivial = function(index) return state.gossip.active[index].isTrivial end
     env.GetServerTime = function() return state.time end
     env.C_Map = { GetBestMapForUnit = function(unit)
         equal(unit, "player")
@@ -502,6 +539,11 @@ local function client(saved, settings, absentSettings)
     end
     state.env = env
     state.namespace = namespace
+    state.flush = function()
+        local callbacks = state.timers
+        state.timers = {}
+        for _, callback in ipairs(callbacks) do callback() end
+    end
     return state
 end
 
@@ -509,9 +551,9 @@ test("metadados e carregamento real do TOC", function()
     equal(metadata.Interface, "120105")
     equal(metadata.Title, "NerdWow")
     equal(metadata.Author, "Greg")
-    equal(metadata.Version, "0.4.1")
+    equal(metadata.Version, "0.5.0")
     equal(metadata.SavedVariables, "NerdWow_Journal, NerdWow_Settings")
-    equal(#order, 12)
+    equal(#order, 18)
     for _, path in ipairs(order) do assert(not path:find("Tests/", 1, true)) end
     local c = client()
     equal(c.env.SLASH_NERDWOW1, "/nerdwow")
@@ -546,7 +588,7 @@ test("entrada, status pt-BR e ajuda", function()
     equal(events[2].type, "LOCATION_CHANGED")
     equal(events[2].timestamp, TIME)
     c.command()
-    assert(c.messages[1]:find("v0.4.1 | esquema 1 | 2 eventos", 1, true))
+    assert(c.messages[1]:find("v0.5.0 | esquema 1 | 2 eventos", 1, true))
     assert(c.messages[1]:find("mudança de local", 1, true))
     assert(c.messages[1]:find("UTC", 1, true))
     assert(c.messages[2]:find("/reload", 1, true))
@@ -719,7 +761,7 @@ test("TOC resolve callback do compartimento para a mesma confirmação", functio
         equal(serialize(c.saved()), before)
         local count = 0
         for _ in pairs(c.registered) do count = count + 1 end
-        equal(count, 13)
+        equal(count, 20)
     end
 end)
 
@@ -1064,7 +1106,7 @@ test("dica mostra versão, totais, pendentes, UTC e instruções em pt-BR", func
     local c = client()
     c.start()
     local text = tooltipText(c)
-    for _, expected in ipairs({ "NerdWow v0.4.1", "Eventos no diário: 2",
+    for _, expected in ipairs({ "NerdWow v0.5.0", "Eventos no diário: 2",
         "Novos desta sessão aguardando gravação: 2", "Último evento:", "UTC",
         "Clique esquerdo: sincronizar", "Arraste com o botão esquerdo" }) do
         assert(text:find(expected, 1, true), expected)
@@ -1139,6 +1181,9 @@ end)
 
 local questSuite = assert(loadstring(sources["Tests/Quests.lua"], "@Tests/Quests.lua"))
 local estimate = questSuite({ test = test, equal = equal, core = core, client = client,
+    serialize = serialize, roundtrip = roundtrip, tooltipText = tooltipText, A = A, B = B, TIME = TIME })
+local gossipSuite = assert(loadstring(sources["Tests/Gossip.lua"], "@Tests/Gossip.lua"))
+gossipSuite({ test = test, equal = equal, core = core, client = client,
     serialize = serialize, roundtrip = roundtrip, tooltipText = tooltipText, A = A, B = B, TIME = TIME })
 return string.format("%d cenários aprovados; runtime: %s / %s. Integração real no Retail pendente.\n%s",
     passed, _VERSION, jit and jit.version or "sem JIT", estimate)

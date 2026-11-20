@@ -2,7 +2,7 @@
 ## Title: NerdWow
 ## Notes: Diário de eventos do personagem para o Nerd-Wow.
 ## Author: Greg
-## Version: 0.6.5
+## Version: 0.7.0
 ## SavedVariables: NerdWow_Journal, NerdWow_Settings, NerdWow_Diagnostics
 ## AddonCompartmentFunc: NerdWow_OnAddonCompartmentClick
 ## X-NerdWow-Assets: Fonts\Cinzel-Regular.ttf, Fonts\Cinzel-Bold.ttf, Fonts\EBGaramond-Regular.ttf, Fonts\EBGaramond-Italic.ttf, Fonts\OFL-Cinzel.txt, Fonts\OFL-EBGaramond.txt, Fonts\SOURCES.txt
@@ -21,6 +21,7 @@ Configuration\Settings.lua
 Minimap\Button.lua
 Interface\Themes.lua
 Interface\Conversation.lua
+Interface\QuestPresentation.lua
 Interface\ConversationController.lua
 Integration\Database.lua
 Integration\Diagnostics.lua
@@ -31,5 +32,7 @@ Integration\Quests.lua
 Integration\Gossip.lua
 Integration\Minimap.lua
 Integration\Conversation.lua
+Integration\QuestPresentation.lua
+Integration\QuestView.lua
 Integration\ConversationView.lua
 Bootstrap.lua

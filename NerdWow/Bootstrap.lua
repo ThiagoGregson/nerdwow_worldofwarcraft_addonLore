@@ -7,6 +7,7 @@ local pendingEvents = 0
 local inWorld = false
 local initialized = false
 local interfaceInWorld = false
+local cinema,questReceipt
 local warnings = {}
 local questDialogs = addon.QuestSession.New()
 addon.QuestDialogs = questDialogs
@@ -66,7 +67,7 @@ local function append(kind, key, payload)
         pendingEvents = math.min(pendingEvents + 1, addon.Schema.MAX_EVENTS)
         if minimap then minimap.RefreshTooltip() end
     end
-    return id
+    return id,failure
 end
 
 local function captureContext()
@@ -103,7 +104,14 @@ end
 local function appendDialogue(kind, model)
     if not journal or not inWorld then return end
     if not currentCharacterKey then captureContext() end
-    if currentCharacterKey then return append(kind, currentCharacterKey, model) end
+    if currentCharacterKey then
+        local id,code=append(kind,currentCharacterKey,model)
+        if model.quest and (id or code=="duplicate_quest") then
+            questReceipt={questID=model.quest.id,kind=kind}
+            if cinema then cinema.Recorded(kind,model.quest.id) end
+        end
+        return id
+    end
 end
 
 local captures = {
@@ -128,7 +136,12 @@ for _, module in ipairs({ addon.QuestCapture, addon.GossipCapture }) do
     for _, event in ipairs(module.Events) do dialogueEvents[#dialogueEvents + 1] = event end
 end
 dialogueEvents[#dialogueEvents + 1] = "PLAYER_REGEN_DISABLED"
-local cinema = addon.ConversationController.New({ GetModel = gossipDialogs.GetCurrent,
+dialogueEvents[#dialogueEvents + 1] = "QUEST_LOG_UPDATE"
+cinema = addon.ConversationController.New({ GetModel = function() return questDialogs.GetCurrent() or gossipDialogs.GetCurrent() end,
+    Prepare=function(model)
+        if model.quest then return addon.QuestPresentation.Build(model,addon.QuestPlatform.ReadState(model),questReceipt) end
+        return addon.Conversation.Build(model)
+    end,
     IsEnabled = function() return interfaceInWorld and settings and settings.Get().dialogEnabled end,
     Platform = addon.ConversationPlatform, View = addon.ConversationView,
     Try = addon.DiagnosticAPI.Try,
@@ -226,7 +239,11 @@ Wow.Listen(function(event, loadedName, experience, money)
             addon.database.BindDiagnostics(diagnosticRoot)
             addon.DiagnosticAPI.Bind(diagnostics.Append)
         end
-        local fontsOK,fontsFault=addon.DiagnosticAPI.Try(addon.FontAPI.Preload)
+        local fontsOK,fontsFault=addon.DiagnosticAPI.Try(function()
+            addon.FontAPI.Preload()
+            local viewport=addon.DiagnosticAPI.Dimensions(UIParent)
+            addon.QuestView.Preload(viewport.viewportWidth,viewport.viewportHeight)
+        end)
         if not fontsOK then
             addon.DiagnosticAPI.Record("interface","font_preload_failed",fontsFault,{stage="font_preload"})
         end
@@ -255,13 +272,15 @@ Wow.Listen(function(event, loadedName, experience, money)
         return
     end
     if initialized then
+        if event=="QUEST_DETAIL" or event=="QUEST_PROGRESS" or event=="QUEST_COMPLETE" or event=="QUEST_ITEM_UPDATE"
+            or event=="PLAYER_LEAVING_WORLD" then questReceipt=nil end
         if event == "PLAYER_ENTERING_WORLD" then interfaceInWorld = true
         elseif event == "PLAYER_LEAVING_WORLD" then interfaceInWorld = false end
         local handled = false
         for _, capture in ipairs(captures) do
             handled = capture.Handle(event, loadedName, experience, money) or handled
         end
-        handled = cinema.Handle(event) or handled
+        handled = cinema.Handle(event,loadedName) or handled
         if handled then return end
     end
     if not journal then

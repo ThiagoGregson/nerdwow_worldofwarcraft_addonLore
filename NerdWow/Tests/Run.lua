@@ -1,5 +1,5 @@
 -- Executado pelo harness; não é carregado pelo TOC nem depende de APIs reais.
-local sources, toc = ...
+local sources, toc, previewFonts = ...
 assert(_VERSION == "Lua 5.1", "Os testes exigem runtime compatível com Lua 5.1")
 local passed = 0
 local function test(name, callback)
@@ -27,6 +27,7 @@ local function core()
     loadModule("Dialogue/GossipSession.lua", namespace, environment)
     loadModule("Interface/Themes.lua", namespace, environment)
     loadModule("Interface/Conversation.lua", namespace, environment)
+    loadModule("Interface/QuestPresentation.lua", namespace, environment)
     loadModule("Interface/ConversationController.lua", namespace, environment)
     loadModule("Journal/Schema.lua", namespace, environment)
     loadModule("Journal/Journal.lua", namespace, environment)
@@ -343,7 +344,7 @@ local function client(saved, settings, absentSettings)
         debugstack = function() return debug.traceback("stack",2) end,
         time = function() return TIME end,
         SlashCmdList = {}, date = os.date, StaticPopupDialogs = {},
-        UIParent = false, GameFontNormal = {},
+        UIParent = false, GameFontNormal = {},Enum={TooltipDataLineType={None=0,UnitName=2,UnitLevel=47,UnitType=48}},C_QuestInfoSystem=false,
     }
     env.InCombatLockdown = function() return state.inCombat end
     env.C_UI = { Reload = function() state.reloads = state.reloads + 1 end }
@@ -373,9 +374,14 @@ local function client(saved, settings, absentSettings)
     end
     env.UnitExists = function(unit) equal(unit, "npc"); return state.npc ~= nil end
     env.C_TooltipInfo = { GetUnit = function(unit)
-        equal(unit, "npc"); return { lines = { {}, { leftText = state.npc and state.npc.subtitle } } }
+        equal(unit, "npc"); return state.unitTooltip or { lines = {
+            {leftText=state.npc and state.npc.name,type=2}, { leftText = state.npc and state.npc.subtitle,type=state.subtitleType or 0 } } }
     end }
     env.GetQuestID = function() return state.quest.id end
+    env.QuestGetAutoAccept=function() return state.autoAccept==true end
+    env.IsQuestCompletable=function() return state.completable==true end
+    env.QuestFlagsPVP=function() return state.pvpQuest==true end
+    env.GetQuestMoneyToGet=function() return state.questCost or 0 end
     for _, entry in ipairs({ { "GetTitleText", "title" }, { "GetQuestText", "description" },
         { "GetObjectiveText", "objectiveText" }, { "GetProgressText", "progressText" },
         { "GetRewardText", "rewardText" }, { "GetRewardMoney", "money" }, { "GetRewardXP", "experience" } }) do
@@ -605,9 +611,9 @@ test("metadados e carregamento real do TOC", function()
     equal(metadata.Interface, "120105")
     equal(metadata.Title, "NerdWow")
     equal(metadata.Author, "Greg")
-    equal(metadata.Version, "0.6.5")
+    equal(metadata.Version, "0.7.0")
     equal(metadata.SavedVariables, "NerdWow_Journal, NerdWow_Settings, NerdWow_Diagnostics")
-    equal(#order, 26)
+    equal(#order, 29)
     for _, path in ipairs(order) do assert(not path:find("Tests/", 1, true)) end
     local c = client()
     equal(c.env.SLASH_NERDWOW1, "/nerdwow")
@@ -642,7 +648,7 @@ test("entrada, status pt-BR e ajuda", function()
     equal(events[2].type, "LOCATION_CHANGED")
     equal(events[2].timestamp, TIME)
     c.command()
-    assert(c.messages[1]:find("v0.6.5 | esquema 1 | 2 eventos", 1, true))
+    assert(c.messages[1]:find("v0.7.0 | esquema 1 | 2 eventos", 1, true))
     assert(c.messages[1]:find("mudança de local", 1, true))
     assert(c.messages[1]:find("UTC", 1, true))
     assert(c.messages[2]:find("/reload", 1, true))
@@ -816,7 +822,7 @@ test("TOC resolve callback do compartimento para a mesma confirmação", functio
         equal(serialize(c.saved()), before)
         local count = 0
         for _ in pairs(c.registered) do count = count + 1 end
-        equal(count, 21)
+        equal(count, 22)
     end
 end)
 
@@ -1160,7 +1166,7 @@ test("dica mostra versão, totais, pendentes, UTC e instruções em pt-BR", func
     local c = client()
     c.start()
     local text = tooltipText(c)
-    for _, expected in ipairs({ "NerdWow v0.6.5", "Eventos no diário: 2",
+    for _, expected in ipairs({ "NerdWow v0.7.0", "Eventos no diário: 2",
         "Novos desta sessão aguardando gravação: 2", "Último evento:", "UTC",
         "Clique esquerdo: sincronizar", "Arraste com o botão esquerdo" }) do
         assert(text:find(expected, 1, true), expected)
@@ -1239,9 +1245,16 @@ local gossipSuite = assert(loadstring(sources["Tests/Gossip.lua"], "@Tests/Gossi
 gossipSuite({ test = test, equal = equal, core = core, client = client,
     serialize = serialize, roundtrip = roundtrip, tooltipText = tooltipText, A = A, B = B, TIME = TIME })
 local interfaceSuite = assert(loadstring(sources["Tests/Conversation.lua"], "@Tests/Conversation.lua"))
-interfaceSuite({ test = test, equal = equal, core = core, client = client, loadModule = loadModule,
+local surfaces=interfaceSuite({ test = test, equal = equal, core = core, client = client, loadModule = loadModule,
     roundtrip = roundtrip, serialize = serialize })
 local diagnosticsSuite = assert(loadstring(sources["Tests/Diagnostics.lua"], "@Tests/Diagnostics.lua"))
 diagnosticsSuite({ test = test, equal = equal, core = core, client = client, serialize = serialize, roundtrip = roundtrip })
-return string.format("%d cenários aprovados; runtime: %s / %s. Integração real no Retail pendente.\n%s",
+local parchmentSuite=assert(loadstring(sources["Tests/QuestPresentation.lua"],"@Tests/QuestPresentation.lua"))
+local parchmentFixtures=parchmentSuite({test=test,equal=equal,core=core,client=client,loadModule=loadModule,serialize=serialize,surfaces=surfaces})
+local report=string.format("%d cenários aprovados; runtime: %s / %s. Integração real no Retail pendente.\n%s",
     passed, _VERSION, jit and jit.version or "sem JIT", estimate)
+if previewFonts then
+    local preview=assert(loadstring(sources["Tests/QuestPreview.lua"],"@Tests/QuestPreview.lua"))
+    report=report.."\n<!--NERDWOW_PREVIEW-->\n"..preview(parchmentFixtures,previewFonts)
+end
+return report

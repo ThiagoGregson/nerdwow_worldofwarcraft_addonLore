@@ -12,6 +12,8 @@ local preparing,faulted=false,false
 local waiting=false
 local measures={}
 local measureOrder={}
+local questPaper
+local refreshPending=false
 local function rgb(hex)
     return tonumber(hex:sub(1,2),16)/255,tonumber(hex:sub(3,4),16)/255,tonumber(hex:sub(5,6),16)/255
 end
@@ -143,10 +145,11 @@ local function place()
     if not shown or not model then return end
     local viewport=dimensions()
     local width,height=viewport.viewportWidth,viewport.viewportHeight
-    layout=addon.Conversation.Layout(width,height)
+    local layoutFor=model.kind=="quest" and addon.QuestPresentation.Layout or addon.Conversation.Layout
+    layout=layoutFor(width,height)
     if not layout then return false end
     local s=layout.scale
-    layout=addon.Conversation.Layout(width,height,textWidth(addon.Conversation.LINE_SAMPLE,"EBGaramond-Regular",layout.speechSize))
+    layout=layoutFor(width,height,textWidth(addon.Conversation.LINE_SAMPLE,"EBGaramond-Regular",layout.speechSize))
     local widthText,left=layout.textWidth,layout.textLeft
     local titleText=model.npc and model.npc.title or ""
     local titleSpace=titleText~="" and math.min(widthText*.36,textWidth(titleText,"EBGaramond-Italic",17*s)+14*s) or 0
@@ -170,7 +173,7 @@ local function place()
     zone:ClearAllPoints(); zone:SetPoint("TOPLEFT",root,"TOPLEFT",(width-zoneGroup)/2,-6*s)
     subzone:ClearAllPoints(); subzone:SetPoint("TOPLEFT",zone,"TOPRIGHT",12*s,-3*s)
     hint:ClearAllPoints(); hint:SetPoint("TOPRIGHT",root,"TOPRIGHT",-48*s,-layout.top+17*s)
-    local _,hintHeight=fit(hint,addon.Text.cinemaHint,"EBGaramond-Regular",12*s,10*s,width*.65)
+    local _,hintHeight=fit(hint,model.kind=="quest" and addon.Text.questHint or addon.Text.cinemaHint,"EBGaramond-Regular",12*s,10*s,width*.65)
     hint:ClearAllPoints(); hint:SetPoint("TOPRIGHT",root,"TOPRIGHT",-48*s,-layout.top+hintHeight+4*s)
     color(hint,model.theme.muted,.8)
     font(exit.label,"Cinzel-Regular",24*s); color(exit.label,model.theme.muted)
@@ -192,7 +195,8 @@ local function place()
     for index=#paragraphData+1,#paragraphs do paragraphs[index]:Hide() end
     child:SetHeight(math.max(1,speechHeight))
     local x,y,rowHeight=0,0,0
-    for index,entry in ipairs(model.entries) do
+    local entries=model.kind=="quest" and {} or model.entries
+    for index,entry in ipairs(entries) do
         local b=button(index); b.entry=entry; b:Show()
         local tokenCallbacks=callbacks
         b:SetScript("OnClick",safe(function() tokenCallbacks.Choose(index) end))
@@ -228,8 +232,8 @@ local function place()
         b:SetEnabled(entry.enabled); b:SetAlpha(1); b.light:SetAlpha(0)
         rowHeight=math.max(rowHeight,itemHeight); x=x+itemWidth+18*s
     end
-    for index=#model.entries+1,#buttons do buttons[index]:Hide() end
-    local optionHeight=#model.entries>0 and -y+rowHeight+2*s or 0
+    for index=#entries+1,#buttons do buttons[index]:Hide() end
+    local optionHeight=#entries>0 and -y+rowHeight+2*s or 0
     optionChild:SetHeight(math.max(1,optionHeight))
     local boxes=addon.Conversation.Arrange(layout,header,speechHeight,optionHeight)
     bottomHeight=boxes.bottom
@@ -256,6 +260,7 @@ local function place()
     crest:ClearAllPoints(); crest:SetPoint("TOPLEFT",root,"BOTTOMLEFT",left-84*s,boxes.headerTop)
     crestShadow:ClearAllPoints(); crestShadow:SetPoint("CENTER",crest,"CENTER",0,-2*s)
     crestShadow:SetVertexColor(0,0,0,.65); crest:SetVertexColor(1,1,1,1)
+    if model.kind=="quest" then questPaper.Place(model,layout) end
     reveal(speech.GetText())
     local eased=1-(1-math.min(1,entrance/.9))^3
     top:SetHeight(math.max(.01,layout.top*eased)); bottom:SetHeight(math.max(.01,bottomHeight*eased))
@@ -270,6 +275,7 @@ local function arrange()
     addon.DiagnosticAPI.Raise(value,"interface_error")
 end
 local function update(_,delta)
+    if questPaper and model.kind=="quest" then questPaper.Advance(delta) end
     if entrance<.9 then
         entrance=math.min(.9,entrance+delta)
         local t=entrance/.9
@@ -291,6 +297,7 @@ function View.New(newCallbacks)
         elseif shown and model then
             local ready,code=arrange()
             if ready==false and code~="font_pending" then error("layout_unavailable") end
+            if ready and refreshPending then refreshPending=false; if callbacks.Updated then callbacks.Updated() end end
         end
     end,"font_ready"))
     root:SetFrameStrata("DIALOG"); root:EnableMouse(false); root:EnableKeyboard(false)
@@ -344,15 +351,23 @@ function View.New(newCallbacks)
     root:SetScript("OnHide",safe(function() root:SetScript("OnUpdate",nil); root:EnableKeyboard(false) end,"OnHide"))
     handle={}
     function handle.Show(input,retryFonts)
-        faulted=false; preparing=false; waiting=false
+        faulted=false; preparing=false; waiting=false; refreshPending=false
         if retryFonts~=false then addon.FontAPI.Retry() end
         model=input; speech=assert(addon.Conversation.NewSpeech(input.text)); entrance=0
+        if input.kind=="quest" then
+            if not questPaper then
+                questPaper=addon.QuestView.New(root,{Font=font,Width=textWidth,Height=textHeight,Safe=safe,
+                    Callbacks=function() return callbacks end})
+            end
+            questPaper.Start()
+        elseif questPaper then questPaper.Hide() end
         local viewport=dimensions()
         local initial=addon.Conversation.Layout(viewport.viewportWidth,viewport.viewportHeight)
         if not initial then
             shown=false; root:Hide(); return false,"layout_pending",viewport
         end
         local s=initial.scale
+        if input.kind=="quest" then questPaper.Prepare(s) end
         -- Start the sizes needed by this layout together, so a missing asset has
         -- one verification window instead of a separate wait for every label.
         for _,request in ipairs({{"Cinzel-Bold",initial.nameSize},{"EBGaramond-Italic",17*s},
@@ -379,10 +394,25 @@ function View.New(newCallbacks)
         return true,nil,dimensions()
     end
     function handle.Hide()
-        shown=false; preparing=false; waiting=false; root:SetScript("OnUpdate",nil); root:EnableKeyboard(false)
+        shown=false; preparing=false; waiting=false; refreshPending=false; root:SetScript("OnUpdate",nil); root:EnableKeyboard(false)
         root:SetPropagateKeyboardInput(true); root:Hide(); model,speech=nil,nil
+        if questPaper then questPaper.Hide() end
     end
     function handle.Complete() if speech then reveal(speech.Complete()) end end
     function handle.IsTyping() return speech and not speech.IsComplete() or false end
+    function handle.Selection(value) if questPaper then questPaper.Selection(value) end end
+    function handle.Recorded(kind) if questPaper then questPaper.Recorded(kind) end end
+    function handle.Refresh(input)
+        if not shown or not model or input.kind~="quest" or model.kind~="quest" then error("invalid_interaction") end
+        if input.text~=model.text then speech=assert(addon.Conversation.NewSpeech(input.text)) end
+        model=input
+        local ready,code=arrange()
+        refreshPending=ready==false and code=="font_pending"
+        if ready==false and code~="font_pending" then error("layout_unavailable") end
+        if (not speech.IsComplete() or entrance<.9) and not root:GetScript("OnUpdate") then
+            root:SetScript("OnUpdate",safe(update,"OnUpdate"))
+        end
+        return ready,code
+    end
     return handle
 end

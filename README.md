@@ -11,6 +11,11 @@
 - Opções numeradas, que podem ser escolhidas pelas teclas **1 a 9**.
 - O visual muda conforme o lugar e o NPC: **Aliança**, **Horda**, **Quel'Thalas** ou **Neutro**.
 
+**Missões em pergaminho**
+- Oferta, progresso e conclusão aparecem num pergaminho à direita, com a legenda do NPC à esquerda.
+- Papel envelhecido, selo do tema, textos completos, objetivos, itens exigidos e recompensas com tooltip nativo.
+- O texto rola dentro do papel; os botões ficam sempre acessíveis no rodapé.
+
 **Diário do personagem**
 - Registra automaticamente:
   - os **locais** por onde você passa;
@@ -25,7 +30,6 @@
 
 ### Em breve
 
-- Pergaminho de missão à direita da tela, com objetivos e recompensas.
 - Câmera cinematográfica no NPC durante a conversa.
 - Narração das falas por voz (TTS).
 - Registro das falas de NPCs no chat.
@@ -37,7 +41,7 @@
 
 ## Instalação
 
-1. Baixe este repositório em **Code → Download ZIP** e extraia o arquivo.
+1. Baixe o repositório [nerdwow_worldofwarcraft_addonLore](https://github.com/ThiagoGregson/nerdwow_worldofwarcraft_addonLore) em **Code → Download ZIP** e extraia o arquivo.
 2. Copie **apenas a pasta `NerdWow`** para:
    `World of Warcraft\_retail_\Interface\AddOns\`
 3. Feche e abra o jogo de novo. Na tela de personagens, em **AddOns**, confira se o NerdWow está ativado.
@@ -55,7 +59,21 @@ Para atualizar, substitua a pasta `NerdWow` pela versão nova e reinicie o jogo.
 | Fechar a conversa | **Esc** ou o **×** no canto superior direito |
 | Ler uma fala longa | Role o mouse sobre o texto |
 
-Ao escolher uma missão, ela abre na janela de missão do jogo (o pergaminho próprio ainda está em desenvolvimento).
+Ao escolher uma missão, o pergaminho abre à direita e mantém a legenda do NPC visível.
+
+### Na missão
+
+| Momento | Como usar |
+| --- | --- |
+| Oferta | **Aceitar** ou **Recusar**; nas missões já aceitas automaticamente, apenas **Confirmar** |
+| Progresso | **Continuar** fica disponível quando a missão puder ser entregue; **Voltar depois** fecha a leitura |
+| Conclusão | Clique numa recompensa ou use **1–9**, depois **Concluir**; uma única opção já vem selecionada |
+| Ler e comparar | Role o mouse sobre o papel e passe sobre os itens para ver o tooltip |
+| Completar a fala ou fechar | **Espaço** completa a legenda; **Esc** ou **×** fecha a missão |
+
+A nota no rodapé aparece quando a oferta ou o progresso foi registrado no diário. A conclusão é registrada após a entrega confirmada pelo jogo. O arquivo em disco continua sendo gravado ao sincronizar, usar `/reload` ou sair do jogo.
+
+`/nerdwow dialogo` também liga e desliga o pergaminho. Em combate, em caso de falha ou numa missão que exija uma confirmação especial da Blizzard (como PvP ou custo de entrega), a interface nativa fica disponível.
 
 ### Botão do minimapa
 
@@ -71,7 +89,7 @@ Ao escolher uma missão, ela abre na janela de missão do jogo (o pergaminho pr�
 | `/nerdwow ajuda` | Lista os comandos |
 | `/nerdwow sincronizar` | Grava o diário em disco (recarrega a interface) |
 | `/nerdwow botao` | Oculta ou mostra o botão do minimapa |
-| `/nerdwow dialogo` | Liga ou desliga a conversa em modo cinema |
+| `/nerdwow dialogo` | Liga ou desliga o cinema e o pergaminho de missão |
 | `/nerdwow diagnostico` | Mostra os últimos erros registrados |
 | `/nerdwow fontes` | Testa as fontes do addon (para relatar problemas) |
 
@@ -90,7 +108,7 @@ Ao escolher uma missão, ela abre na janela de missão do jogo (o pergaminho pr�
 **A conversa em modo cinema não aparece**
 1. Confira se ela está ligada com `/nerdwow dialogo`.
 2. Desative outros addons de conversa, como o DialogueUI.
-3. Use `/nerdwow diagnostico` para ver o erro registrado e inclua essa informação ao relatar o problema.
+3. Use `/nerdwow diagnostico` para ver o erro registrado e inclua essa informação ao [relatar o problema](https://github.com/ThiagoGregson/nerdwow_worldofwarcraft_addonLore/issues).
 
 Se algo der errado, o NerdWow devolve a conversa para a janela da Blizzard, então você nunca fica preso numa conversa.
 
@@ -104,6 +122,8 @@ Isso acontece logo depois de uma atualização do jogo. Na lista de AddOns, marq
 
 ## Direitos
 
-© Greg. Todos os direitos reservados. O código está disponível para leitura, como exige a política de addons da Blizzard, mas não é distribuído sob nenhuma licença de uso, modificação ou redistribuição. As fontes incluídas mantêm a própria licença (OFL).
+© [gregson.com.br](https://gregson.com.br). Todos os direitos reservados.
+
+O código está disponível para leitura, como exige a política de addons da Blizzard, mas não é distribuído sob nenhuma licença de uso, modificação ou redistribuição. Para qualquer uso além de instalar e jogar, entre em contato pelo [gregson.com.br](https://gregson.com.br). As fontes incluídas mantêm a própria licença (OFL).
 
 O NerdWow não é afiliado nem endossado pela Blizzard Entertainment. World of Warcraft é marca registrada da Blizzard Entertainment, Inc.

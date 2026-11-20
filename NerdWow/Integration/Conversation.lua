@@ -125,9 +125,10 @@ function Platform.Select(entry,moment)
 end
 function Platform.Close(moment)
     if moment=="GOSSIP" and type(C_GossipInfo)=="table" then invoke(C_GossipInfo.CloseGossip)
-    elseif moment=="GREETING" then invoke(CloseQuest)
+    elseif moment=="GREETING" or moment=="OFFER" or moment=="PROGRESS" or moment=="COMPLETE" then invoke(CloseQuest)
     else error("invalid_interaction") end
 end
+function Platform.QuestAction(view,key,selected) return addon.QuestPlatform.Action(view,key,selected) end
 function Platform.KeyAllowed()
     if plain(InCombatLockdown()) then return false end
     if GetCurrentKeyBoardFocus and plain(GetCurrentKeyBoardFocus()) then return false end

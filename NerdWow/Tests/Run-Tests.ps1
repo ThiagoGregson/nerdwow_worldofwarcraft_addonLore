@@ -1,5 +1,6 @@
 ﻿param(
-    [string]$LuaDll = 'C:\Program Files\obs-studio\bin\64bit\lua51.dll'
+    [string]$LuaDll = 'C:\Program Files\obs-studio\bin\64bit\lua51.dll',
+    [string]$PreviewPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -134,12 +135,20 @@ try {
     Write-Output ('Sintaxe aprovada: {0} arquivos Lua.' -f $files.Count)
     $toc = [IO.File]::ReadAllText((Join-Path $addonRoot 'NerdWow.toc'), [Text.Encoding]::UTF8)
     [void]$script.AppendLine(('local toc = ' + (Get-LuaString $toc)))
-    [void]$script.AppendLine('return assert(loadstring(sources["Tests/Run.lua"], "Tests/Run.lua"))(sources, toc)')
+    $previewFonts = if ($PreviewPath) { Get-LuaString ((Join-Path $addonRoot 'Fonts').Replace('\','/')) } else { 'nil' }
+    [void]$script.AppendLine(('return assert(loadstring(sources["Tests/Run.lua"], "Tests/Run.lua"))(sources, toc, '+$previewFonts+')'))
     $suite = [Text.Encoding]::UTF8.GetBytes($script.ToString())
     $result = [NerdWowLuaHost]::luaL_loadbuffer($state, $suite, [UIntPtr]::new([uint64]$suite.Length), 'NerdWow tests')
     if ($result -eq 0) { $result = [NerdWowLuaHost]::lua_pcall($state, 0, 1, 0) }
     $message = Get-LuaResult $state
     if ($result -ne 0) { throw $message }
+    if ($PreviewPath) {
+        $marker="`n<!--NERDWOW_PREVIEW-->`n"
+        $split=$message.IndexOf($marker,[StringComparison]::Ordinal)
+        if ($split -lt 0) { throw 'Prévia não produzida.' }
+        [IO.File]::WriteAllText([IO.Path]::GetFullPath($PreviewPath),$message.Substring($split+$marker.Length),[Text.UTF8Encoding]::new($false))
+        $message=$message.Substring(0,$split)
+    }
     Write-Output $message
 } finally {
     if ($state -ne [IntPtr]::Zero) { [NerdWowLuaHost]::lua_close($state) }

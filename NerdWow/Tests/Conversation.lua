@@ -382,6 +382,8 @@ local function renderer(n,asynchronous)
         function f:SetPoint(...) self.points=self.points or {}; self.points[#self.points+1]={...} end
         function f:SetAlpha(value) self.alpha=value end
         function f:SetFrameStrata(value) self.strata=value end
+        function f:GetFrameLevel() return self.level or (self.parent and self.parent:GetFrameLevel()+1) or 0 end
+        function f:SetFrameLevel(value) self.level=value end
         function f:EnableMouse(value) self.mouse=value end
         local function keyboardFrame()
             assert(kind=="Frame" or kind=="Button" or kind=="ScrollFrame","teclado exige frame")
@@ -392,6 +394,7 @@ local function renderer(n,asynchronous)
         function f:RegisterForClicks(value) self.clicks=value end
         function f:SetEnabled(value) self.enabled=value end
         function f:SetScript(name,callback) self.scripts[name]=callback end
+        function f:GetScript(name) return self.scripts[name] end
         function f:Show()
             local wasShown=self.shown; self.shown=true
             if not wasShown and self.scripts.OnShow then self.scripts.OnShow(self) end
@@ -400,7 +403,7 @@ local function renderer(n,asynchronous)
             local shown=self.shown; self.shown=false
             if shown and self.scripts.OnHide then self.scripts.OnHide(self) end
         end
-        function f:CreateTexture() return make("Texture",self) end
+        function f:CreateTexture(_,layer) local object=make("Texture",self); object.layer=layer; return object end
         function f:CreateMaskTexture() return make("Mask",self) end
         function f:CreateFontString(_,_,template)
             local value=make("FontString",self)
@@ -415,6 +418,9 @@ local function renderer(n,asynchronous)
             assert(value==nil or type(value)=="string" or type(value)=="number","asset de textura inválido")
             self.texture=value; return true
         end
+        function f:SetAtlas(value) self.atlas=value end
+        function f:SetRotation(value) self.rotation=value end
+        function f:SetTexCoord(...) self.texCoord={...} end
         function f:SetColorTexture(...) assert(kind=="Texture"); self.fill={...} end
         function f:SetGradient(orientation,from,to)
             assert(kind=="Texture" and (orientation=="HORIZONTAL" or orientation=="VERTICAL"))
@@ -455,6 +461,7 @@ local function renderer(n,asynchronous)
             if self.kind=="FontString" and not self.font then error("FontString:SetText(): Font not set") end
             self.text=value
         end
+        function f:GetText() return self.text end
         function f:SetTextColor(...) self.textColor={...} end
         function f:SetShadowColor(...) self.shadow={...} end
         function f:SetShadowOffset(...) self.shadowOffset={...} end
@@ -471,7 +478,8 @@ local function renderer(n,asynchronous)
         end
         local function naturalWidth(text)
             local _,characters=(text or ""):gsub("[^\128-\191]","")
-            return characters*(f.size or 16)*.45*(f.metricFactor or 1)
+            local ratio=f.font and f.font:find("Cinzel",1,true) and .58 or .45
+            return characters*(f.size or 16)*ratio*(f.metricFactor or 1)
         end
         function f:GetUnboundedStringWidth()
             state.metricReads[#state.metricReads+1]={path=self.font,size=self.size,text=self.text,at=state.now,factor=self.metricFactor}
@@ -511,6 +519,7 @@ local function renderer(n,asynchronous)
     t.loadModule("Locales/ptBR.lua",n,{})
     t.loadModule("Integration/Diagnostics.lua",n,env)
     t.loadModule("Integration/Fonts.lua",n,env)
+    t.loadModule("Integration/QuestView.lua",n,env)
     t.loadModule("Integration/ConversationView.lua",n,env)
     return state
 end
@@ -1298,3 +1307,4 @@ test("redimensionar e ocultar o pai preservam modelo e retomam apenas animação
     frame:Hide(); frame:Show(); equal(frame.scripts.OnUpdate,nil)
     c.Close(); equal(frame.keyboard,false)
 end)
+return {renderer=renderer,platform=platform,wire=wire}

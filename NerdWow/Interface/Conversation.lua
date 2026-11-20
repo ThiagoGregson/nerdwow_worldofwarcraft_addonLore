@@ -45,13 +45,42 @@ function Conversation.Key(key, typing)
     if key=="SPACE" and typing then return "complete" end
     if type(key)=="string" and key:match("^[1-9]$") then return "choose", tonumber(key) end
 end
-function Conversation.Layout(width,height)
+Conversation.LINE_SAMPLE="A história de Azeroth vive nas palavras de quem protege os antigos lares"
+function Conversation.Layout(width,height,lineWidth)
     if type(width)~="number" or type(height)~="number" or width<=0 or height<=0
         or width==math.huge or height==math.huge or width~=width or height~=height then return nil end
     local scale=math.min(width/1280,height/720)
+    local speechSize=22*scale
+    if type(lineWidth)~="number" or lineWidth<=0 or lineWidth~=lineWidth or lineWidth==math.huge then
+        lineWidth=72*speechSize*.5
+    end
+    local textWidth=math.min(width*.88-84*scale,lineWidth)
     return { scale=scale, width=width, height=height, top=height*.09, bottom=height*.27,
-        maximumBottom=height*.50, contentWidth=math.min(width*.88,1160*scale), speechSize=22*scale,
+        maximumBottom=height*.38, textWidth=textWidth, textLeft=(width-textWidth)/2,
+        contentWidth=textWidth+84*scale, speechSize=speechSize,
         optionSize=18*scale, nameSize=21*scale, zoneSize=15*scale }
+end
+function Conversation.Arrange(layout,header,speech,options)
+    local s=layout.scale
+    local optionHeight=math.min(options,layout.maximumBottom*.36)
+    local fixed=18*s+header+8*s+14*s+12*s+optionHeight+18*s
+    local bottom=math.min(layout.maximumBottom,math.max(layout.bottom,fixed+speech))
+    local speechTop=bottom-18*s-header-8*s
+    local speechBottom=18*s+optionHeight+12*s+14*s
+    return {bottom=bottom,headerTop=bottom-18*s,speechTop=speechTop,
+        speechHeight=math.max(1,speechTop-speechBottom),speechBottom=speechBottom,
+        optionHeight=math.max(1,optionHeight),optionBottom=18*s}
+end
+function Conversation.Paragraphs(text)
+    local result,position={},1
+    while position<=#text do
+        local first,last=text:find("\r?\n[ \t\r]*\n[ \t\r\n]*",position)
+        local finish=first and first-1 or #text
+        if finish>=position then result[#result+1]={text=text:sub(position,finish),first=position,last=finish} end
+        if not first then break end
+        position=last+1
+    end
+    return result
 end
 function Conversation.NewSpeech(text)
     if type(text)~="string" then return nil,"invalid_speech" end

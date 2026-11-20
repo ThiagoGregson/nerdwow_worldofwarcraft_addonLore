@@ -358,6 +358,7 @@ local function renderer(n)
         end
         function f:GetHeight()
             if self.kind=="Frame" and self.parent and self.parent.kind=="UIParent" and not self.shown then return 0 end
+            if self.kind=="FontString" and not self.height and not self.all then return 0 end
             return self.height or (self.all and self.all:GetHeight()) or (self.parent and self.parent:GetHeight()) or 0
         end
         function f:SetAllPoints(target) self.all=target or self.parent end
@@ -428,15 +429,38 @@ local function renderer(n)
         function f:SetJustifyH(value) self.justifyH=value end
         function f:SetJustifyV(value) self.justifyV=value end
         function f:SetWordWrap(value) self.wrap=value end
+        function f:SetNonSpaceWrap(value) self.nonSpaceWrap=value end
         function f:SetSpacing(value) self.spacing=value end
-        function f:GetStringWidth() return #(self.text or "")*(self.size or 16)*.45 end
+        local function measurable(self)
+            if state.zeroMetrics or (not self.all and not (self.points and self.points[1])) then return false end
+            local ancestor=self
+            while ancestor do if not ancestor.shown then return false end; ancestor=ancestor.parent end
+            return true
+        end
+        local function naturalWidth(text)
+            local _,characters=(text or ""):gsub("[^\128-\191]","")
+            return characters*(f.size or 16)*.45
+        end
+        function f:GetUnboundedStringWidth()
+            if not measurable(self) then return 0 end
+            local width=0
+            for part in ((self.text or "").."\n"):gmatch("([^\n]*)\n") do width=math.max(width,naturalWidth(part)) end
+            return width
+        end
+        function f:GetStringWidth() return math.min(self:GetUnboundedStringWidth(),self:GetWidth()) end
         function f:GetStringHeight()
-            return math.max(1,math.ceil(self:GetStringWidth()/math.max(1,self:GetWidth())))*(self.size or 16)*1.4
+            if not measurable(self) then return 0 end
+            local lines=0
+            for part in ((self.text or "").."\n"):gmatch("([^\n]*)\n") do
+                lines=lines+(self.wrap==false and 1 or math.max(1,math.ceil(naturalWidth(part)/math.max(1,self:GetWidth()))))
+            end
+            return lines*(self.size or 16)*1.4+math.max(0,lines-1)*(self.spacing or 0)
         end
         function f:SetScrollChild(value) self.child=value end
         function f:SetVerticalScroll(value) self.scroll=value end
         function f:GetVerticalScroll() return self.scroll or 0 end
-        function f:GetVerticalScrollRange() return math.max(0,self.child:GetHeight()-self:GetHeight()) end
+        function f:UpdateScrollChildRect() self.scrollRange=math.max(0,self.child:GetHeight()-self:GetHeight()) end
+        function f:GetVerticalScrollRange() return self.scrollRange or 0 end
         if kind=="FontString" or kind=="Texture" then state.regions[#state.regions+1]=f end
         return f
     end
@@ -668,8 +692,11 @@ test("layout aplica fontes sem contorno com flags nil e não faz aquecimento aut
     local view=n.ConversationView.New({Error=function() error("view failure") end})
     equal(#r.fontCalls,0)
     equal(view.Show(assert(n.Conversation.Build(model()))),true)
-    equal(r.fontCalls[1].path,"Interface\\AddOns\\NerdWow\\Fonts\\Cinzel-Bold.ttf")
-    equal(r.fontCalls[1].size,21)
+    local found=false
+    for _,call in ipairs(r.fontCalls) do
+        if call.path=="Interface\\AddOns\\NerdWow\\Fonts\\Cinzel-Bold.ttf" and call.size==21 then found=true end
+    end
+    assert(found)
     for _, call in ipairs(r.fontCalls) do equal(call.flags,nil); assert(call.size>=8) end
 end)
 
@@ -764,6 +791,191 @@ test("teste de fontes durante cinema não altera texto teclado animação nem di
     end
     equal(t.serialize(clientState.saved()),before); equal(#clientState.diagnostics().entries,18)
     equal(reports,0); c.Close(); equal(p.root.alpha,.75)
+end)
+
+test("coluna medida tem setenta e dois caracteres e independe da proporção e escala UI",function()
+    local c=core().Conversation
+    local _,characters=c.LINE_SAMPLE:gsub("[^\128-\191]",""); equal(characters,72)
+    for _,size in ipairs({{1920,1080},{2560,1440},{3440,1440},{5120,1440}}) do
+        for _,uiScale in ipairs({.64,.8,1,1.25}) do
+            local width,height=size[1]/uiScale,size[2]/uiScale
+            local base=assert(c.Layout(width,height))
+            local measured=72*base.speechSize*.45
+            local layout=assert(c.Layout(width,height,measured))
+            equal(layout.textWidth,measured); equal(layout.textLeft+layout.textWidth/2,width/2)
+            equal(layout.maximumBottom,height*.38)
+            assert(layout.textLeft>=84*layout.scale)
+        end
+    end
+end)
+
+test("barra conserva vinte e sete por cento e limita texto extenso a trinta e oito",function()
+    local c=core().Conversation
+    for _,size in ipairs({{1920,1080},{2560,1440},{3440,1440},{5120,1440}}) do
+        local layout=c.Layout(size[1],size[2]); local s=layout.scale
+        local short=c.Arrange(layout,30*s,44*s,28*s)
+        equal(short.bottom,layout.bottom)
+        local long=c.Arrange(layout,30*s,10000*s,28*s)
+        equal(long.bottom,layout.maximumBottom)
+        assert(long.speechHeight>44*s)
+        equal(long.speechTop+8*s+30*s,long.headerTop)
+        assert(long.speechBottom>long.optionBottom+long.optionHeight)
+    end
+end)
+
+test("parágrafos preservam offsets texto original quebras simples e UTF-8",function()
+    local c=core().Conversation
+    local original="Primeira linha\nAinda aqui.\n\n  \nVocê chegou.\r\n\r\nÚltima fala."
+    local parts=c.Paragraphs(original); equal(#parts,3)
+    equal(parts[1].text,"Primeira linha\nAinda aqui.")
+    equal(parts[2].text,"Você chegou."); equal(parts[3].text,"Última fala.")
+    for _,part in ipairs(parts) do equal(original:sub(part.first,part.last),part.text) end
+    equal(#c.Paragraphs(""),0)
+end)
+
+test("superfície não mede FontString oculto ou sem âncora e distingue largura sem limite",function()
+    local r=renderer(core()); local object=r.parent:CreateFontString(nil,"OVERLAY","GameFontNormal")
+    object:SetText("Texto muito mais largo que a caixa"); object:SetSize(20,50)
+    equal(object:GetStringWidth(),0); equal(object:GetStringHeight(),0)
+    object:SetPoint("TOPLEFT",r.parent,"TOPLEFT",0,0)
+    assert(object:GetUnboundedStringWidth()>object:GetStringWidth())
+    object:Hide(); equal(object:GetStringWidth(),0); equal(object:GetStringHeight(),0)
+    object:Show(); assert(object:GetUnboundedStringWidth()>20)
+end)
+
+test("nome longo não quebra e fala respeita cabeçalho nas quatro resoluções e escalas",function()
+    for _,size in ipairs({{1920,1080},{2560,1440},{3440,1440},{5120,1440}}) do
+        for _,uiScale in ipairs({.64,.8,1,1.25}) do
+            local n=core(); local r=renderer(n); r.parent:SetSize(size[1]/uiScale,size[2]/uiScale)
+            local source=model(); source.npc.name=string.rep("Arquivista Áurea de Quel'Thalas ",12)
+            source.npc.title="Guardiã dos registros"
+            local original=source.npc.name
+            local view=n.ConversationView.New({Error=function() error("layout failure") end})
+            equal(view.Show(assert(n.Conversation.Build(source))),true); view.Complete()
+            r.frames[1].scripts.OnUpdate(r.frames[1],1)
+            local nameLabel,titleLabel
+            for _,region in ipairs(r.regions) do
+                if region.kind=="FontString" and region.alpha~=0 then
+                    if region.text and region.text:find("...",1,true) then nameLabel=region end
+                    if region.text==source.npc.title then titleLabel=region end
+                end
+            end
+            assert(nameLabel and titleLabel); equal(nameLabel.wrap,false); equal(nameLabel.nonSpaceWrap,false)
+            assert(nameLabel.size>=14*(size[2]/uiScale/720))
+            local speechScroll=r.frames[2]
+            local headerTop=nameLabel.points[1][5]
+            assert(speechScroll.points[1][5]<=headerTop-nameLabel.height)
+            assert(speechScroll.points[1][5]<=headerTop-titleLabel.height-3*(size[2]/uiScale/720))
+            equal(source.npc.name,original)
+        end
+    end
+end)
+
+test("zona subzona e dica ocupam caixas centradas e faixas sem conflito inclusive com fonte nativa",function()
+    for _,size in ipairs({{1920,1080},{2560,1440},{3440,1440},{5120,1440}}) do
+        local n=core(); local r=renderer(n); r.parent:SetSize(size[1],size[2])
+        r.rejectFont=function(path) return path:find("NerdWow\\Fonts\\",1,true)~=nil end
+        local view=n.ConversationView.New({Error=function() error("layout failure") end})
+        equal(view.Show(assert(n.Conversation.Build(model()))),true); view.Complete()
+        r.frames[1].scripts.OnUpdate(r.frames[1],1)
+        local zoneLabel,subLabel,hintLabel
+        for _,region in ipairs(r.regions) do
+            if region.kind=="FontString" and region.alpha~=0 then
+                if region.text=="Floresta do Canto Eterno" then zoneLabel=region end
+                if region.text=="Corredor dos Arquivistas" then subLabel=region end
+                if region.text==n.Text.cinemaHint then hintLabel=region end
+                if region.text and region.text~="" and region.shown then assert(region:GetWidth()>0 and region:GetHeight()>0) end
+            end
+        end
+        assert(zoneLabel and subLabel and hintLabel)
+        local s=size[2]/720
+        local zoneLeft=zoneLabel.points[1][4]
+        local total=zoneLabel.width+12*s+subLabel.width
+        assert(math.abs(zoneLeft+total/2-size[1]/2)<.001)
+        local hintTop=-hintLabel.points[1][5]
+        assert(hintTop>6*s+zoneLabel.height)
+        assert(hintTop>9*s+subLabel.height)
+        assert(hintTop+hintLabel.height<=size[2]*.09)
+    end
+end)
+
+test("medidor mostrado e fallback de métricas zero mantêm opções completas com caixas positivas",function()
+    for _,zero in ipairs({false,true}) do
+        local n=core(); local r=renderer(n); r.zeroMetrics=zero
+        local source=model(); source.options[1].text=string.rep("História completa de Azeroth ",20)
+        local view=n.ConversationView.New({Error=function() error("layout failure") end})
+        equal(view.Show(assert(n.Conversation.Build(source))),true); view.Complete()
+        r.frames[1].scripts.OnUpdate(r.frames[1],1)
+        local optionLabel,numberLabel,measure
+        for _,region in ipairs(r.regions) do
+            if region.kind=="FontString" then
+                if region.alpha==0 and region.width==100000 then measure=region end
+                if region.alpha~=0 and region.text==source.options[1].text then optionLabel=region end
+                if region.text=="4" then numberLabel=region end
+            end
+        end
+        assert(measure and measure.shown and measure.points[1])
+        assert(optionLabel and numberLabel)
+        equal(optionLabel.text,source.options[1].text); assert(optionLabel.width>500)
+        assert(optionLabel.height>optionLabel.size*1.4)
+        assert(optionLabel.parent.height>=optionLabel.height+8)
+        equal(numberLabel.width,22); equal(numberLabel.height,22)
+        equal(optionLabel.parent.parent,r.frames[5])
+    end
+end)
+
+test("fala extensa rola sem mover opções e mostra indicação discreta dentro do limite",function()
+    local n=core(); local r=renderer(n)
+    local source=model(); source.text=string.rep("Uma história extensa para contar. ",200)
+    local view=n.ConversationView.New({Error=function() error("layout failure") end})
+    equal(view.Show(assert(n.Conversation.Build(source))),true); view.Complete()
+    local root,speechScroll,optionScroll=r.frames[1],r.frames[2],r.frames[4]
+    root.scripts.OnUpdate(root,1)
+    equal(r.regions[2].height,720*.38)
+    local beforeX,beforeY=optionScroll.points[1][4],optionScroll.points[1][5]
+    speechScroll.scripts.OnMouseWheel(speechScroll,-1)
+    assert(speechScroll:GetVerticalScroll()>0); equal(optionScroll:GetVerticalScroll(),0)
+    equal(optionScroll.points[1][4],beforeX); equal(optionScroll.points[1][5],beforeY)
+    local indication=false
+    for _,region in ipairs(r.regions) do if region.text==n.Text.cinemaMore then indication=true end end
+    assert(indication)
+    assert(optionScroll.points[1][5]+optionScroll.height<speechScroll.points[1][5]-speechScroll.height)
+end)
+
+test("muitas opções têm rolagem própria sem truncar texto nem alterar atalhos",function()
+    local n=core(); local r=renderer(n); local source=model()
+    source.availableQuests={}; source.activeQuests={}; source.options={}
+    for index=1,30 do source.options[index]={index=index,optionID=7000+index,text="Conte toda a história "..index,status=0} end
+    local view=n.ConversationView.New({Error=function() error("layout failure") end})
+    equal(view.Show(assert(n.Conversation.Build(source))),true); view.Complete()
+    r.frames[1].scripts.OnUpdate(r.frames[1],1)
+    local speechScroll,optionScroll=r.frames[2],r.frames[4]
+    assert(optionScroll:GetVerticalScrollRange()>0)
+    optionScroll.scripts.OnMouseWheel(optionScroll,-1)
+    assert(optionScroll:GetVerticalScroll()>0); equal(speechScroll:GetVerticalScroll(),0)
+    local found=0
+    for _,region in ipairs(r.regions) do
+        if region.alpha~=0 and region.text and region.text:find("Conte toda a história ",1,true) then found=found+1 end
+    end
+    equal(found,30)
+    local action,index=n.Conversation.Key("9",false); equal(action,"choose"); equal(index,9)
+end)
+
+test("parágrafos têm intervalo menor que linha vazia sem mudar modelo ou animação",function()
+    local n=core(); local r=renderer(n); local source=model()
+    source.text="Pela Luz, é você mesmo?\n\nMas vejam só!\n\nMuito bem!"
+    local original=source.text
+    local view=n.ConversationView.New({Error=function() error("layout failure") end})
+    equal(view.Show(assert(n.Conversation.Build(source))),true); view.Complete()
+    local a,b
+    for _,region in ipairs(r.regions) do
+        if region.alpha~=0 and region.text=="Pela Luz, é você mesmo?" then a=region end
+        if region.alpha~=0 and region.text=="Mas vejam só!" then b=region end
+    end
+    assert(a and b)
+    local gap=-b.points[1][5]-(-a.points[1][5]+a.height)
+    assert(gap>0 and gap<a.size)
+    equal(source.text,original); equal(view.IsTyping(),false)
 end)
 
 test("fonte que não carrega aciona fallback antes de suprimir apresentação nativa",function()

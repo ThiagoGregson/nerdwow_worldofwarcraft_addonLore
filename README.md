@@ -25,7 +25,7 @@
 
 **Botão no minimapa**
 - Mostra o status do diário ao passar o mouse.
-- Um clique **sincroniza**, ou seja, grava o diário em disco.
+- O clique esquerdo **sincroniza**, ou seja, grava o diário em disco. O botão direito abre as **Configurações**.
 - Dá para arrastar o botão para qualquer ponto da borda do minimapa.
 
 ### Em breve
@@ -81,9 +81,20 @@ A nota no rodapé aparece quando a oferta ou o progresso foi registrado no diár
 
 ### Botão do minimapa
 
-- **Clique:** sincroniza o diário (pede confirmação e recarrega a interface).
+- **Clique esquerdo:** sincroniza o diário (pede confirmação e recarrega a interface).
+- **Botão direito:** abre o livro de Configurações.
 - **Arrastar:** move o botão pela borda do minimapa.
 - **Passar o mouse:** mostra a versão, o total de eventos e quantos ainda não foram gravados.
+
+### Configurações
+
+Abra o livro com `/nerdwow config`, pelo botão direito no minimapa ou em **Opções → AddOns → NerdWow**. Clique em um capítulo ou use as setas para cima e para baixo; **Esc** fecha.
+
+No livro, você pode mostrar ou ocultar o botão, escolher um tema automático ou fixo, ligar o cinema, ajustar a velocidade da fala e desligar os atalhos **1–9**. **Espaço**, **Esc** e os cliques continuam funcionando. As mudanças valem na hora, inclusive na conversa e no pergaminho já abertos.
+
+O capítulo **Diário** mostra os eventos e permite sincronizar com a confirmação existente. **Avançado** mostra os diagnósticos e o teste de fontes; **Sobre** traz a versão e um endereço selecionável do GitHub para copiar com **Ctrl+C**. As opções marcadas **em breve** ficam desativadas.
+
+**Restaurar padrões** pede confirmação e preserva o diário e a posição do botão. As preferências são salvas automaticamente pelo addon em memória; o jogo grava o arquivo ao sincronizar, usar `/reload` ou sair normalmente.
 
 ### Comandos
 
@@ -91,6 +102,7 @@ A nota no rodapé aparece quando a oferta ou o progresso foi registrado no diár
 | --- | --- |
 | `/nerdwow` | Mostra o status do diário |
 | `/nerdwow ajuda` | Lista os comandos |
+| `/nerdwow config` | Abre o livro de Configurações |
 | `/nerdwow sincronizar` | Grava o diário em disco (recarrega a interface) |
 | `/nerdwow botao` | Oculta ou mostra o botão do minimapa |
 | `/nerdwow dialogo` | Liga ou desliga o cinema e o pergaminho de missão |

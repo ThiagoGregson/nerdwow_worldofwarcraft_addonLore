@@ -58,6 +58,7 @@ function Button.Tooltip(view, text)
     end
     lines[#lines + 1] = " "
     lines[#lines + 1] = text.buttonClick
+    lines[#lines + 1] = text.buttonRightClick
     lines[#lines + 1] = text.buttonDrag
     return lines
 end

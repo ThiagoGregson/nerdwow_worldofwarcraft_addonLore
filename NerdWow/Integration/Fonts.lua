@@ -12,7 +12,7 @@ local files = {
 local embedded, reported, profiles, order = {},{},{},{}
 local readyFiles={}
 local applications = setmetatable({}, {__mode="k"})
-local preloaded, frame, changed, probes, testGeneration = false,nil,nil,{},0
+local preloaded, frame, changed, probes, testGeneration = false,nil,{}, {},0
 for _, file in ipairs(files) do file.path=BASE..file.name..".ttf"; embedded[file.name]=file end
 local function restricted(value)
     if issecretvalue and issecretvalue(value) then error("restricted_font_result") end
@@ -56,7 +56,11 @@ local function detail(message,fault)
     return {message=message..(fault and fault.message and "; error="..fault.message or ""),
         stack=fault and fault.stack,redacted=fault and fault.redacted}
 end
-local function notify() if changed and type(C_Timer)=="table" and type(C_Timer.After)=="function" then changed() end end
+local function notify()
+    if type(C_Timer)=="table" and type(C_Timer.After)=="function" then
+        for _,callback in pairs(changed) do callback() end
+    end
+end
 local function invisible()
     if not frame then
         frame=CreateFrame("Frame",nil,UIParent)
@@ -171,7 +175,7 @@ function Fonts.Retry()
     end
 end
 -- The singleton renderer replaces its callback instead of accumulating listeners.
-function Fonts.Watch(callback) changed=callback end
+function Fonts.Watch(callback,key) changed[key or "conversation"]=callback end
 function Fonts.Apply(object,name,size)
     local file=embedded[name]
     if not file or not positive(size) then error("font_unavailable") end

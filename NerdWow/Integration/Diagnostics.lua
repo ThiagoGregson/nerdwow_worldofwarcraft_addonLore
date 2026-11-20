@@ -133,3 +133,7 @@ function API.ChatText(value)
     value=text(value,160) or ""
     return value:gsub("[\r\n\t]"," "):gsub("|","||")
 end
+function API.DisplayText(value)
+    value=text(value,2048) or ""
+    return value:gsub("\t","    "):gsub("|","||")
+end

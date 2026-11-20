@@ -1,6 +1,6 @@
 -- Development-only drawing of the real renderer's recorded regions/anchors.
 -- Native bitmaps and font metrics are approximated; this is not a Retail screenshot.
-local fixtures,fonts=...
+local fixtures,fonts,configuration=...
 local function esc(value)
     return tostring(value):gsub("&","&amp;"):gsub("<","&lt;"):gsub(">","&gt;"):gsub('"',"&quot;")
 end
@@ -64,7 +64,7 @@ local function draw(s)
             defs[#defs+1]=string.format('<clipPath id="%s"><rect x="%g" y="%g" width="%g" height="%g"/></clipPath>',
                 id,clip.x,720-clip.y-clip.h,clip.w,clip.h)
             local shape
-            if object.kind=="FontString" and object.text and object.text~="" then
+            if (object.kind=="FontString" or object.kind=="EditBox") and object.text and object.text~="" then
                 local family=(object.font or ""):match("([^\\]+)%.ttf$") or "EBGaramond-Regular"
                 shape=string.format('<foreignObject x="%g" y="%g" width="%g" height="%g"><div xmlns="http://www.w3.org/1999/xhtml" style="width:100%%;height:100%%;overflow:hidden;font-family:%s;font-size:%gpx;line-height:%gpx;color:%s;white-space:%s;text-align:%s;%s">%s</div></foreignObject>',
                     b.x,y,b.w,b.h,family,object.size or 16,(object.size or 16)*1.4+(object.spacing or 0),
@@ -129,4 +129,19 @@ for _,sample in ipairs({{"M",.953},{"W",.971},{"Á",.717}}) do
     html[#html+1]='<h2>Capitular '..sample[1]..'</h2>'..draw(s)
 end
 html[#html+1]='</main></html>'
+if configuration then
+    table.remove(html)
+    for _,chapter in ipairs({"Geral","Diálogo","Câmera e interface","Personagem","Diário","Avançado","Sobre"}) do
+        local s=configuration.scene(); s.version=configuration.version; s.source={moment="BOOK"..#html}
+        s.diagnostics={{lastTimestamp=1,code="interface_error",count=2,version="0.7.2",message="Exemplo de diagnóstico: fonte indisponível durante a apresentação.",context={stage="show"}}}
+        s.open(); s.select(chapter)
+        if chapter=="Avançado" then s.select("Ver registros") end
+        html[#html+1]='<h2>Livro · '..chapter..'</h2>'..draw(s)
+    end
+    for _,theme in ipairs({"horde","quelthalas","neutral"}) do
+        local s=configuration.scene(); s.version=configuration.version; s.source={moment="BOOK"..theme}; s.settings.Set("theme",theme); s.open()
+        html[#html+1]='<h2>Livro · '..theme..'</h2>'..draw(s)
+    end
+    html[#html+1]='</main></html>'
+end
 return table.concat(html)

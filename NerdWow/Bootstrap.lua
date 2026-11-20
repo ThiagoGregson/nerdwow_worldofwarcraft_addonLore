@@ -66,6 +66,7 @@ local function append(kind, key, payload)
     else
         pendingEvents = math.min(pendingEvents + 1, addon.Schema.MAX_EVENTS)
         if minimap then minimap.RefreshTooltip() end
+        addon.ConfigurationUI.RefreshInfo()
     end
     return id,failure
 end
@@ -137,12 +138,14 @@ for _, module in ipairs({ addon.QuestCapture, addon.GossipCapture }) do
 end
 dialogueEvents[#dialogueEvents + 1] = "PLAYER_REGEN_DISABLED"
 dialogueEvents[#dialogueEvents + 1] = "QUEST_LOG_UPDATE"
+dialogueEvents[#dialogueEvents + 1] = "PLAYER_REGEN_ENABLED"
 cinema = addon.ConversationController.New({ GetModel = function() return questDialogs.GetCurrent() or gossipDialogs.GetCurrent() end,
     Prepare=function(model)
         if model.quest then return addon.QuestPresentation.Build(model,addon.QuestPlatform.ReadState(model),questReceipt) end
         return addon.Conversation.Build(model)
     end,
     IsEnabled = function() return interfaceInWorld and settings and settings.Get().dialogEnabled end,
+    GetPreferences=function() return settings and settings.Get() or {} end,
     Platform = addon.ConversationPlatform, View = addon.ConversationView,
     Try = addon.DiagnosticAPI.Try,
     Diagnose = function(fault,context,model)
@@ -169,6 +172,7 @@ Wow.RegisterCommand(function(message)
         Wow.RequestSync()
         return
     end
+    if argument=="config" then addon.ConfigurationUI.Open(); return end
     if argument == "fontes" then
         if not initialized then Wow.Print(Text.fontsNotReady); return end
         local ok,fault=addon.DiagnosticAPI.Try(addon.FontAPI.Test,Wow.Print)
@@ -200,15 +204,13 @@ Wow.RegisterCommand(function(message)
             Wow.Print(Text.buttonNotReady)
             return
         end
-        local hidden = settings.ToggleHidden()
-        minimap.Refresh()
+        local hidden = settings.Toggle("minimapHidden")
         Wow.Print(hidden and Text.buttonHidden or Text.buttonShown)
         return
     end
     if argument == "dialogo" then
         if not settings then Wow.Print(Text.dialogNotReady); return end
-        local enabled = settings.ToggleDialog()
-        cinema.Toggle()
+        local enabled = settings.Toggle("dialogEnabled")
         Wow.Print(enabled and Text.dialogEnabled or Text.dialogDisabled)
         return
     end
@@ -251,7 +253,7 @@ Wow.Listen(function(event, loadedName, experience, money)
         settings, settingsRoot, repaired = addon.Settings.Open(addon.database.ReadSettings())
         addon.database.BindSettings(settingsRoot)
         for _, field in ipairs(repaired) do
-            Wow.Print(string.format(Text.settingsRecovered, Text.settingsFields[field]))
+            Wow.Print(string.format(Text.settingsRecovered, Text.settingsFields[field] or field))
         end
         local saved = addon.database.Read()
         local root
@@ -267,11 +269,38 @@ Wow.Listen(function(event, loadedName, experience, money)
             rejected(blockedCode,nil,"journal",nil,nil,"open")
             Wow.Print(string.format(Text.blocked, reason(blockedCode)))
         end
-        minimap = addon.MinimapUI.Create({ GetSettings = settings.Get, SetAngle = settings.SetAngle,
-            GetTooltip = tooltip, OnClick = Wow.RequestSync })
+        minimap = addon.MinimapUI.Create({ GetSettings = settings.Get,
+            SetAngle=function(angle) return settings.Set("minimapAngle",angle) end,
+            GetTooltip = tooltip, OnClick = Wow.RequestSync, OnRightClick=addon.ConfigurationUI.Open })
+        settings.Subscribe(function(keys)
+            local ok,fault=addon.DiagnosticAPI.Try(function()
+                local changed={}; for _,key in ipairs(keys) do changed[key]=true end
+                if changed.minimapHidden then minimap.Refresh() end
+                if changed.dialogEnabled then cinema.Toggle()
+                elseif changed.theme or changed.speechSpeed or changed.numberHotkeys then cinema.Configure() end
+                addon.ConfigurationUI.Refresh()
+            end)
+            if not ok then addon.DiagnosticAPI.Record("interface","configuration_apply_failed",fault,{stage="configuration_apply"}) end
+        end)
+        addon.ConfigurationUI.Initialize({Settings=settings,
+            Diagnostics=function() if diagnostics then return diagnostics.Recent(5) end; return nil,diagnosticCode or "not_initialized" end,
+            ReadInfo=function(key)
+                if key=="journal.limit" then return tostring(addon.Schema.MAX_EVENTS) end
+                if not journal then return Text.unavailable end
+                local status=journal.GetStatus()
+                if key=="journal.total" then return status.totalEvents end
+                if key=="journal.pending" then return math.min(pendingEvents,status.totalEvents) end
+                if key=="journal.last" then
+                    if not status.lastTimestamp then return Text.noTime end
+                    return (Wow.FormatTime(status.lastTimestamp):match("(%d%d:%d%d:%d%d)") or Text.unavailable).." UTC"
+                end
+                return Text.unavailable
+            end})
         return
     end
     if initialized then
+        if event=="PLAYER_LEAVING_WORLD" then addon.ConfigurationUI.Close() else addon.ConfigurationUI.RefreshInfo() end
+        if event=="PLAYER_REGEN_ENABLED" then return end
         if event=="QUEST_DETAIL" or event=="QUEST_PROGRESS" or event=="QUEST_COMPLETE" or event=="QUEST_ITEM_UPDATE"
             or event=="PLAYER_LEAVING_WORLD" then questReceipt=nil end
         if event == "PLAYER_ENTERING_WORLD" then interfaceInWorld = true

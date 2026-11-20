@@ -143,6 +143,7 @@ function Platform.Close(moment)
 end
 function Platform.QuestAction(view,key,selected) return addon.QuestPlatform.Action(view,key,selected) end
 function Platform.KeyAllowed()
+    if addon.ConfigurationUI and addon.ConfigurationUI.IsOpen() then return false end
     if plain(InCombatLockdown()) then return false end
     if GetCurrentKeyBoardFocus and plain(GetCurrentKeyBoardFocus()) then return false end
     if plain(IsControlKeyDown()) or plain(IsAltKeyDown()) or plain(IsShiftKeyDown()) then return false end

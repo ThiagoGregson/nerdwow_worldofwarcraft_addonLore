@@ -8,7 +8,7 @@ function MinimapUI.Create(options)
     local button = CreateFrame("Button", nil, Minimap)
     button:SetSize(32, 32)
     button:SetFrameLevel(Minimap:GetFrameLevel() + 8)
-    button:RegisterForClicks("LeftButtonUp")
+    button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     button:SetHitRectInsets(2, 2, 2, 2)
 
     local mask = button:CreateMaskTexture()
@@ -91,6 +91,11 @@ function MinimapUI.Create(options)
         button:SetScript("OnUpdate", move)
     end)
     button:SetScript("OnMouseUp", function(_, mouseButton, inside)
+        if mouseButton=="RightButton" then
+            local dragging=gesture.IsDragging(); stop()
+            if not dragging and inside~=false and options.OnRightClick then options.OnRightClick() end
+            return
+        end
         if mouseButton ~= "LeftButton" then return end
         move()
         local action = gesture.Release()

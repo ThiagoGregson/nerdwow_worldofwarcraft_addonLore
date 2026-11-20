@@ -62,7 +62,7 @@ test("barreira preserva mensagem textual e stack antes de desenrolar a pilha",fu
     c.namespace.DiagnosticAPI.Record("interface","interface_error",fault,{gameEvent="GOSSIP_SHOW",stage="show"},
         {moment="GOSSIP",npc={creatureID=197}})
     local saved=recent(c)
-    equal(saved.message,fault.message); equal(saved.stack,fault.stack); equal(saved.version,"0.7.2")
+    equal(saved.message,fault.message); equal(saved.stack,fault.stack); equal(saved.version,"0.8.0")
     equal(saved.context.gameEvent,"GOSSIP_SHOW"); equal(saved.context.moment,"GOSSIP"); equal(saved.context.creatureID,197)
     equal(saved.timestamp,c.time)
 end)
@@ -290,7 +290,7 @@ test("comando fontes cobre dezoito combinações e persiste resultados sem mudar
         local flags=call.flags==nil and "nil" or '"'..call.flags..'"'
         local key=call.path..":"..flags; assert(not combinations[key]); combinations[key]=true; paths[call.path]=true
         local entry=c.diagnostics().entries[index-4]
-        equal(entry.code,"font_test"); equal(entry.category,"interface"); equal(entry.version,"0.7.2")
+        equal(entry.code,"font_test"); equal(entry.category,"interface"); equal(entry.version,"0.8.0")
         equal(entry.context.gameEvent,"COMMAND_FONTES"); equal(entry.context.stage,"font_probe")
         assert(entry.message:find("font="..call.path.."; flags="..flags.."; size=21; success=true; phase=immediate",1,true))
         assert(entry.message:find("; applied=true",1,true))

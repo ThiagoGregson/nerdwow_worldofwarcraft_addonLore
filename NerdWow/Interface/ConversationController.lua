@@ -113,6 +113,7 @@ function Controller.New(options)
                 diagnose(fault,"quest_native_required"); release(); return true
             end
             if not prepared then error(code or "invalid_conversation") end
+            addon.Conversation.Configure(prepared,options.GetPreferences and options.GetPreferences())
             if prepared.kind~="quest" and not addon.GossipDialogue.HasContent(model) then release(); return true end
             if prepared.kind=="quest" and previous and previous.kind=="quest"
                 and previous.quest.id==prepared.quest.id and previous.moment==prepared.moment then
@@ -162,6 +163,7 @@ function Controller.New(options)
             end
             local prepared,code=options.Prepare(model)
             if not prepared then error(code or "quest_state_unavailable") end
+            addon.Conversation.Configure(prepared,options.GetPreferences and options.GetPreferences())
             local selected=addon.QuestPresentation.ValidChoice(current,current.selected)
             if selected and addon.QuestPresentation.ValidChoice(prepared,selected.value,selected.itemID) then prepared.selected=selected.value end
             generation=generation+1
@@ -178,6 +180,15 @@ function Controller.New(options)
     function controller.Toggle()
         failed=false; gameEvent="COMMAND_DIALOGO"; release()
         guard("toggle",function() if options.IsEnabled() then controller.Schedule() end end)
+    end
+    function controller.Configure()
+        guard("configure",function()
+            if current and not pending then
+                local preferences=options.GetPreferences and options.GetPreferences() or {}
+                addon.Conversation.Configure(current,preferences)
+                if view.Configure then view.Configure(preferences) end
+            end
+        end)
     end
     function controller.Complete() if current and view and not pending then guard("complete",view.Complete) end end
     function controller.Close()
@@ -233,6 +244,7 @@ function Controller.New(options)
         local ok,typing=attempt(view.IsTyping)
         if not ok then controller.Fail(typing,"key"); return false end
         local action,index=addon.Conversation.Key(key,typing)
+        if action=="choose" and current.numberHotkeys==false then return false end
         if action=="choose" and current.kind=="quest" and #current.entries==0 then return false end
         if action=="choose" then controller.Choose(index)
         elseif action=="close" then controller.Close()

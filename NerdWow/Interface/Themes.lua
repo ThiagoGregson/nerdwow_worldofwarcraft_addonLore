@@ -13,9 +13,10 @@ local definitions = {
     neutral = { accent="7fa58c", secondary="c2a56a", glow="d9f0dc",
         crest="Interface\\Minimap\\UI-Minimap-WorldMapIcon", roundCrest=true },
 }
-function Themes.Resolve(location, npc)
+function Themes.Resolve(location, npc, fixed)
     local key = "neutral"
-    if location and maps[location.mapID] then key = "quelthalas"
+    if definitions[fixed] then key=fixed
+    elseif location and maps[location.mapID] then key = "quelthalas"
     elseif npc and npc.faction == "Alliance" then key = "alliance"
     elseif npc and npc.faction == "Horde" then key = "horde" end
     local result = { key=key, night="07060a", subtitle="f3e9d2", option="d8ccb4", muted="a99d86" }

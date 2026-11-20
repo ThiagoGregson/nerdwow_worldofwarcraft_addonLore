@@ -1,5 +1,5 @@
 local _, addon = ...
-local Conversation = {}
+local Conversation = { DEFAULT_SPEED=60 }
 addon.Conversation = Conversation
 local function nonblank(value) return type(value)=="string" and value:find("%S") ~= nil end
 local function unique(entries, field, value)
@@ -45,6 +45,12 @@ function Conversation.Key(key, typing)
     if key=="SPACE" and typing then return "complete" end
     if type(key)=="string" and key:match("^[1-9]$") then return "choose", tonumber(key) end
 end
+function Conversation.Configure(view,preferences)
+    preferences=preferences or {}
+    view.theme=addon.DialogueThemes.Resolve(view.location,view.npc,preferences.theme)
+    view.speechSpeed=preferences.speechSpeed or Conversation.DEFAULT_SPEED
+    view.numberHotkeys=preferences.numberHotkeys~=false
+end
 Conversation.LINE_SAMPLE="A história de Azeroth vive nas palavras de quem protege os antigos lares"
 function Conversation.Layout(width,height,lineWidth)
     if type(width)~="number" or type(height)~="number" or width<=0 or height<=0
@@ -82,7 +88,7 @@ function Conversation.Hint(view,typing)
     if typing then parts[#parts+1]=addon.Text.cinemaHintSpeech end
     for index,entry in ipairs(view.entries or {}) do
         if index>9 then break end
-        if entry.enabled then
+        if entry.enabled and view.numberHotkeys~=false then
             parts[#parts+1]=view.kind=="quest" and addon.Text.cinemaHintReward or addon.Text.cinemaHintOption
             break
         end
@@ -101,8 +107,10 @@ function Conversation.Paragraphs(text)
     end
     return result
 end
-function Conversation.NewSpeech(text)
+function Conversation.NewSpeech(text,speed)
     if type(text)~="string" then return nil,"invalid_speech" end
+    speed=speed or Conversation.DEFAULT_SPEED
+    if type(speed)~="number" or speed<=0 or speed~=speed or speed==math.huge then return nil,"invalid_speed" end
     local ends, position = {}, 1
     while position<=#text do
         local finish, visible
@@ -132,10 +140,14 @@ function Conversation.NewSpeech(text)
     function handle.GetText() return rendered end
     function handle.IsComplete() return revealed==#ends end
     function handle.Complete() revealed=#ends; rendered=text; return text end
+    function handle.SetSpeed(value)
+        if type(value)~="number" or value<=0 or value~=value or value==math.huge then return nil,"invalid_speed" end
+        elapsed=elapsed*speed/value; speed=value; return true
+    end
     function handle.Advance(delta)
         if type(delta)~="number" or delta<0 or delta~=delta or delta==math.huge then return handle.GetText(),false end
         elapsed=elapsed+delta
-        local nextValue=math.min(#ends,math.floor(elapsed*60))
+        local nextValue=math.min(#ends,math.floor(elapsed*speed))
         if nextValue<revealed then nextValue=revealed end
         local changed=nextValue~=revealed
         revealed=nextValue

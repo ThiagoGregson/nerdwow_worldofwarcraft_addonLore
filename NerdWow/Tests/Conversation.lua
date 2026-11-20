@@ -388,6 +388,8 @@ local function renderer(n,asynchronous)
         function f:ClearAllPoints() self.points={} end
         function f:SetPoint(...) self.points=self.points or {}; self.points[#self.points+1]={...} end
         function f:SetAlpha(value) self.alpha=value end
+        function f:SetScale(value) self.scale=value end
+        function f:IsShown() return self.shown end
         function f:SetFrameStrata(value) self.strata=value end
         function f:GetFrameLevel() return self.level or (self.parent and self.parent:GetFrameLevel()+1) or 0 end
         function f:SetFrameLevel(value) self.level=value end
@@ -400,6 +402,29 @@ local function renderer(n,asynchronous)
         function f:EnableMouseWheel(value) self.wheel=value end
         function f:RegisterForClicks(value) self.clicks=value end
         function f:SetEnabled(value) self.enabled=value end
+        function f:Enable() assert(kind=="Slider" or kind=="EditBox"); self.enabled=true end
+        function f:Disable() assert(kind=="Slider" or kind=="EditBox"); self.enabled=false end
+        function f:SetOrientation(value) assert(kind=="Slider"); self.orientation=value end
+        function f:SetMinMaxValues(minimum,maximum) assert(kind=="Slider"); self.minimum,self.maximum=minimum,maximum end
+        function f:SetValueStep(step) assert(kind=="Slider"); self.step=step end
+        function f:SetObeyStepOnDrag(value) assert(kind=="Slider"); self.obeyStep=value end
+        function f:SetThumbTexture(value) assert(kind=="Slider" and value.kind=="Texture"); self.thumb=value end
+        function f:SetValue(value)
+            assert(kind=="Slider"); local changed=self.value~=value; self.value=value
+            if self.thumb then self.thumb:ClearAllPoints(); self.thumb:SetPoint("CENTER",self,"LEFT",(value-self.minimum)/(self.maximum-self.minimum)*self:GetWidth(),0) end
+            if changed and self.scripts.OnValueChanged then self.scripts.OnValueChanged(self,value) end
+        end
+        function f:SetAutoFocus(value) assert(kind=="EditBox"); self.autoFocus=value end
+        function f:SetMultiLine(value) assert(kind=="EditBox"); self.multiline=value end
+        function f:SetMaxLetters(value) assert(kind=="EditBox"); self.maxLetters=value end
+        function f:SetCursorPosition(value) assert(kind=="EditBox"); self.cursor=value end
+        function f:HighlightText() assert(kind=="EditBox"); self.highlighted=true end
+        function f:HasFocus() assert(kind=="EditBox"); return state.focus==self end
+        function f:SetFocus()
+            assert(kind=="EditBox"); state.focus=self
+            if self.scripts.OnEditFocusGained then self.scripts.OnEditFocusGained(self) end
+        end
+        function f:ClearFocus() if state.focus==self then state.focus=nil end end
         function f:SetScript(name,callback) self.scripts[name]=callback end
         function f:GetScript(name) return self.scripts[name] end
         function f:Show()
@@ -408,6 +433,8 @@ local function renderer(n,asynchronous)
         end
         function f:Hide()
             local shown=self.shown; self.shown=false
+            local focus=state.focus
+            while type(focus)=="table" do if focus==self then state.focus=nil; break end; focus=focus.parent end
             if shown and self.scripts.OnHide then self.scripts.OnHide(self) end
         end
         function f:CreateTexture(_,layer) local object=make("Texture",self); object.layer=layer; return object end
@@ -415,7 +442,7 @@ local function renderer(n,asynchronous)
         function f:CreateFontString(_,_,template)
             local value=make("FontString",self)
             if template then
-                assert(template=="GameFontNormal","modelo de fonte não simulado")
+                assert(template=="GameFontNormal" or template=="GameFontNormalLarge" or template=="GameFontHighlight","modelo de fonte não simulado")
                 value.font,value.size="Fonts\\FRIZQT__.TTF",12
             end
             return value
@@ -441,7 +468,7 @@ local function renderer(n,asynchronous)
             self.mask=value
         end
         function f:SetFont(path,size,flags)
-            assert(kind=="FontString" and type(path)=="string" and path~="")
+            assert((kind=="FontString" or kind=="EditBox") and type(path)=="string" and path~="")
             assert(type(size)=="number" and size>0 and size<math.huge)
             assert(flags==nil or flags=="" or flags=="OUTLINE","flags não simuladas")
             state.fontCalls[#state.fontCalls+1]={path=path,size=size,flags=flags}
@@ -501,6 +528,7 @@ local function renderer(n,asynchronous)
         function f:GetStringWidth() return math.min(self:GetUnboundedStringWidth(),self:GetWidth()) end
         function f:GetStringHeight()
             if not measurable(self) then return 0 end
+            if self.text==nil or self.text=="" then return 0 end
             local lines=0
             for part in ((self.text or "").."\n"):gmatch("([^\n]*)\n") do
                 lines=lines+(self.wrap==false and 1 or math.max(1,math.ceil(naturalWidth(part)/math.max(1,self:GetWidth()))))
@@ -512,7 +540,7 @@ local function renderer(n,asynchronous)
         function f:GetVerticalScroll() return self.scroll or 0 end
         function f:UpdateScrollChildRect() self.scrollRange=math.max(0,self.child:GetHeight()-self:GetHeight()) end
         function f:GetVerticalScrollRange() return self.scrollRange or 0 end
-        if kind=="FontString" or kind=="Texture" then state.regions[#state.regions+1]=f end
+        if kind=="FontString" or kind=="Texture" or kind=="EditBox" then state.regions[#state.regions+1]=f end
         return f
     end
     local parent=make("UIParent"); parent:SetSize(1280,720)

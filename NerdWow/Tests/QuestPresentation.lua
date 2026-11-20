@@ -24,7 +24,7 @@ local function build(n,model,state,receipt)
 end
 local function scene(moment,async)
     local n=core(); local p=t.surfaces.platform(n); local r=t.surfaces.renderer(n,async)
-    local s={n=n,p=p,r=r,source=source(moment),calls={},receipt=nil,reports=0,autoAccept=false,completable=false}
+    local s={n=n,p=p,r=r,source=source(moment),calls={},receipt=nil,reports=0,autoAccept=false,completable=false,preferences={}}
     local env=r.env
     env.GetQuestID=function() return s.actualID or s.source.quest.id end
     env.QuestGetAutoAccept=function() return s.autoAccept end
@@ -51,6 +51,7 @@ local function scene(moment,async)
     t.loadModule("Integration/Dialogue.lua",n,env)
     t.loadModule("Integration/QuestPresentation.lua",n,env)
     s.c=n.ConversationController.New({GetModel=function() return s.source end,IsEnabled=function() return not s.disabled end,
+        GetPreferences=function() return s.preferences end,
         Prepare=function(model)
             if not model.quest then return n.Conversation.Build(model) end
             return n.QuestPresentation.Build(model,n.QuestPlatform.ReadState(model),s.receipt)

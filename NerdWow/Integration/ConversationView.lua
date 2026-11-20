@@ -398,7 +398,7 @@ function View.New(newCallbacks)
         transitioning=false
         faulted=false; preparing=false; waiting=false; refreshPending=false
         if retryFonts~=false then addon.FontAPI.Retry() end
-        model=input; speech=assert(addon.Conversation.NewSpeech(input.text))
+        model=input; speech=assert(addon.Conversation.NewSpeech(input.text,input.speechSpeed))
         if not retained then entrance=0 end
         if input.kind=="quest" then
             if not questPaper then
@@ -449,10 +449,17 @@ function View.New(newCallbacks)
     function handle.Complete() if speech then reveal(speech.Complete()); keyHint() end end
     function handle.IsTyping() return speech and not speech.IsComplete() or false end
     function handle.Selection(value) if questPaper then questPaper.Selection(value) end end
+    function handle.Configure(preferences)
+        if not model or not shown then return end
+        addon.Conversation.Configure(model,preferences)
+        if speech then speech.SetSpeed(model.speechSpeed) end
+        local ready,code=arrange()
+        if ready==false and code~="font_pending" then error("layout_unavailable") end
+    end
     function handle.Recorded(kind) if questPaper then questPaper.Recorded(kind) end end
     function handle.Refresh(input)
         if not shown or not model or input.kind~="quest" or model.kind~="quest" then error("invalid_interaction") end
-        if input.text~=model.text then speech=assert(addon.Conversation.NewSpeech(input.text)) end
+        if input.text~=model.text then speech=assert(addon.Conversation.NewSpeech(input.text,input.speechSpeed)) end
         model=input
         local ready,code=arrange()
         refreshPending=ready==false and code=="font_pending"

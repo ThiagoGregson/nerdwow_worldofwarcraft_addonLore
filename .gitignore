@@ -1,0 +1,65 @@
+# NerdWow — arquivos que nunca devem ir para o repositório público.
+# O código do addon (NerdWow/), as ferramentas (Tools/), as fontes OFL e as
+# artes do addon (.tga/.blp dentro de NerdWow/) continuam versionados.
+
+# ---------------------------------------------------------------------------
+# Dados do jogo e do personagem (pessoais)
+# SavedVariables guardam o diário, nome do personagem, GUID e pasta da conta.
+# ---------------------------------------------------------------------------
+WTF/
+SavedVariables/
+NerdWow_Journal*.lua
+*.lua.bak
+*.lua.old
+Cache/
+
+# Prints e logs do cliente (podem mostrar personagem, chat e outros jogadores)
+Screenshots/
+WoWScrnShot_*.jpg
+WoWScrnShot_*.png
+Logs/
+*.log
+taint.log
+
+# ---------------------------------------------------------------------------
+# Segredos (ex.: chaves de serviços de voz/TTS ou de IA usadas no futuro)
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.secret
+*.secret.*
+secrets/
+*.key
+*.pem
+*.pfx
+*.p12
+credentials*.json
+
+# ---------------------------------------------------------------------------
+# Ambiente local de desenvolvimento
+# Workspaces do VS Code costumam conter caminhos absolutos da máquina.
+# ---------------------------------------------------------------------------
+.vscode/
+*.code-workspace
+.idea/
+*.swp
+*~
+
+# Sistema operacional
+desktop.ini
+Thumbs.db
+ehthumbs.db
+$RECYCLE.BIN/
+.DS_Store
+
+# ---------------------------------------------------------------------------
+# Saídas temporárias, de teste e de empacotamento
+# ---------------------------------------------------------------------------
+*.tmp
+*.temp
+*.bak
+TestResults/
+dist/
+build/
+*.zip

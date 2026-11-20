@@ -57,7 +57,7 @@ test("barreira preserva mensagem textual e stack antes de desenrolar a pilha",fu
     c.namespace.DiagnosticAPI.Record("interface","interface_error",fault,{gameEvent="GOSSIP_SHOW",stage="show"},
         {moment="GOSSIP",npc={creatureID=197}})
     local saved=recent(c)
-    equal(saved.message,fault.message); equal(saved.stack,fault.stack); equal(saved.version,"0.6.4")
+    equal(saved.message,fault.message); equal(saved.stack,fault.stack); equal(saved.version,"0.6.5")
     equal(saved.context.gameEvent,"GOSSIP_SHOW"); equal(saved.context.moment,"GOSSIP"); equal(saved.context.creatureID,197)
     equal(saved.timestamp,c.time)
 end)
@@ -275,17 +275,20 @@ test("comando fontes cobre dezoito combinações e persiste resultados sem mudar
     local c=client(); c.start()
     local journal,settings=t.serialize(c.saved()),t.serialize(c.settings())
     c.command(" FONTES ")
-    equal(#c.messages,7); equal(#c.fontCalls,18); equal(#c.diagnostics().entries,18)
-    equal(#c.fontFrames,1); equal(c.fontFrames[1].shown,false)
+    equal(#c.messages,7); equal(#c.fontCalls,22); equal(#c.diagnostics().entries,18)
+    equal(#c.fontFrames,1); equal(c.fontFrames[1].alpha,0); equal(c.fontFrames[1].mouse,false)
     local paths,combinations={},{}
     for index,call in ipairs(c.fontCalls) do
+        if index>4 then
         equal(call.size,21)
         local flags=call.flags==nil and "nil" or '"'..call.flags..'"'
         local key=call.path..":"..flags; assert(not combinations[key]); combinations[key]=true; paths[call.path]=true
-        local entry=c.diagnostics().entries[index]
-        equal(entry.code,"font_test"); equal(entry.category,"interface"); equal(entry.version,"0.6.4")
+        local entry=c.diagnostics().entries[index-4]
+        equal(entry.code,"font_test"); equal(entry.category,"interface"); equal(entry.version,"0.6.5")
         equal(entry.context.gameEvent,"COMMAND_FONTES"); equal(entry.context.stage,"font_probe")
-        equal(entry.message,"font="..call.path.."; flags="..flags.."; size=21; success=true")
+        assert(entry.message:find("font="..call.path.."; flags="..flags.."; size=21; success=true; phase=immediate",1,true))
+        assert(entry.message:find("; applied=true",1,true))
+        end
     end
     local count=0; for _ in pairs(paths) do count=count+1 end; equal(count,6)
     assert(paths["Fonts\\FRIZQT__.TTF"]); assert(paths["Fonts\\ARIALN.TTF"])
@@ -303,10 +306,10 @@ test("teste de fontes distingue flags recusadas e exceções sem aplicar fallbac
         return flags==""
     end
     c.command("fontes")
-    equal(#c.fontCalls,18); equal(#c.diagnostics().entries,18)
+    equal(#c.fontCalls,22); equal(#c.diagnostics().entries,18)
     local rejected,exceptions=0,0
     for index,entry in ipairs(c.diagnostics().entries) do
-        local call=c.fontCalls[index]
+        local call=c.fontCalls[index+4]
         if call.flags=="" then
             rejected=rejected+1; assert(entry.message:find('flags=""; size=21; success=false',1,true))
         elseif entry.message:find("probe_original_error",1,true) then
@@ -314,7 +317,7 @@ test("teste de fontes distingue flags recusadas e exceções sem aplicar fallbac
         else assert(entry.message:find("success=true",1,true)) end
     end
     equal(rejected,6); equal(exceptions,1)
-    assert(c.messages[3]:find('nil=OK | ""=recusada | OUTLINE=erro',1,true))
+    assert(c.messages[3]:find('nil=OK | ""=false (verificando) | OUTLINE=erro',1,true))
 end)
 
 test("teste repete chamadas reais reutiliza probe oculto e respeita retenção existente",function()
@@ -322,7 +325,7 @@ test("teste repete chamadas reais reutiliza probe oculto e respeita retenção e
     c.namespace.DiagnosticAPI.Record("interface","interface_error",{message="histórico preservado"})
     c.command("fontes"); equal(c.diagnostics().entries[1].message,"histórico preservado")
     c.command("fontes"); c.command("fontes")
-    equal(#c.fontFrames,1); equal(#c.fontCalls,54); equal(#c.diagnostics().entries,50)
+    equal(#c.fontFrames,1); equal(#c.fontCalls,58); equal(#c.diagnostics().entries,50)
     equal(c.diagnostics().schemaVersion,1)
 end)
 
@@ -331,7 +334,7 @@ test("diagnóstico bloqueado não impede teste de fontes nem altera raiz preserv
     c.env.NerdWow_Diagnostics={schemaVersion=9,entries={},extra="guardar"}
     local before=t.serialize(c.env.NerdWow_Diagnostics)
     c.start(); c.command("fontes")
-    equal(#c.fontCalls,18); equal(t.serialize(c.env.NerdWow_Diagnostics),before)
+    equal(#c.fontCalls,22); equal(t.serialize(c.env.NerdWow_Diagnostics),before)
     assert(c.messages[#c.messages]:find("Diagnóstico indisponível",1,true))
 end)
 
@@ -339,5 +342,67 @@ test("comando fontes exige inicialização e funciona com diário suspenso",func
     local c=client({schemaVersion=99})
     c.command("fontes"); equal(c.fontCalls,nil); assert(c.messages[1]:find("ainda não inicializado",1,true))
     c.start(); c.command("fontes")
-    equal(#c.fontCalls,18); equal(c.saved().schemaVersion,99)
+    equal(#c.fontCalls,22); equal(c.saved().schemaVersion,99)
+end)
+
+test("fontes registra false imediato e identidade aplicada depois em dezoito probes independentes",function()
+    local c=client(); c.deferFont=true; c.start()
+    equal(#c.fontCalls,4) -- Preload no ADDON_LOADED, antes da primeira conversa.
+    local journal,settings=t.serialize(c.saved()),t.serialize(c.settings())
+    c.command("fontes"); equal(#c.fontCalls,22); equal(#c.diagnostics().entries,18); equal(#c.messages,7)
+    local falseCount=0
+    for _,record in ipairs(c.diagnostics().entries) do
+        if record.message:find("NerdWow\\Fonts\\",1,true) then
+            falseCount=falseCount+1; assert(record.message:find("success=false",1,true))
+            assert(record.message:find("; applied=false",1,true))
+        end
+    end
+    equal(falseCount,12)
+    for _=1,52 do c.flush() end
+    equal(#c.diagnostics().entries,36); equal(#c.messages,14)
+    for index=19,36 do
+        local record=c.diagnostics().entries[index]
+        equal(record.code,"font_test_loaded"); equal(record.context.stage,"font_probe_loaded")
+        assert(record.message:find("; ready=true",1,true)); assert(record.message:find("; applied=true",1,true))
+        assert(record.message:find("; width=",1,true)); assert(record.message:find("; height=",1,true))
+        if record.message:find("NerdWow\\Fonts\\",1,true) then assert(record.message:find("success=false",1,true)) end
+    end
+    for index=9,14 do assert(c.messages[index]:find('nil=aplicada | ""=aplicada | OUTLINE=aplicada',1,true)) end
+    equal(t.serialize(c.saved()),journal); equal(t.serialize(c.settings()),settings); equal(#c.timers,0)
+end)
+
+test("repetir fontes cancela observações antigas e reutiliza probes sem resultado misturado",function()
+    local c=client(); c.deferFont=true; c.start()
+    c.command("fontes"); c.command("fontes")
+    for _=1,52 do c.flush() end
+    equal(#c.fontFrames,1); equal(#c.fontCalls,40); equal(#c.diagnostics().entries,50)
+    local delayedCount=0
+    for _,record in ipairs(c.diagnostics().entries) do
+        if record.code=="font_test_loaded" then delayedCount=delayedCount+1; assert(record.message:find("; applied=true",1,true)) end
+    end
+    equal(delayedCount,18); equal(#c.messages,21); equal(#c.timers,0)
+end)
+
+test("diagnóstico tardio distingue não aplicação de fonte aplicada sem métrica",function()
+    for _,zero in ipairs({false,true}) do
+        local c=client(); c.start()
+        if zero then
+            c.namespace.FontAPI.Test(function() end)
+            local font=c.fontFrames[1].label
+            font.GetUnboundedStringWidth=function() return 0 end
+            font.GetStringHeight=function() return 0 end
+        else
+            c.rejectFont=function(path) return path:find("NerdWow\\Fonts\\",1,true)~=nil end
+            c.command("fontes")
+        end
+        for _=1,52 do c.flush() end
+        local nonApplied,noMetrics=0,0
+        for _,record in ipairs(c.diagnostics().entries) do
+            if record.code=="font_test_loaded" then
+                if record.message:find("; applied=false",1,true) then nonApplied=nonApplied+1 end
+                if record.message:find("; applied=true",1,true) and record.message:find("; ready=false",1,true) then noMetrics=noMetrics+1 end
+            end
+        end
+        if zero then equal(noMetrics,1); equal(nonApplied,0) else equal(nonApplied,12); equal(noMetrics,0) end
+    end
 end)

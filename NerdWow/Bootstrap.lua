@@ -226,6 +226,10 @@ Wow.Listen(function(event, loadedName, experience, money)
             addon.database.BindDiagnostics(diagnosticRoot)
             addon.DiagnosticAPI.Bind(diagnostics.Append)
         end
+        local fontsOK,fontsFault=addon.DiagnosticAPI.Try(addon.FontAPI.Preload)
+        if not fontsOK then
+            addon.DiagnosticAPI.Record("interface","font_preload_failed",fontsFault,{stage="font_preload"})
+        end
         local settingsRoot, repaired
         settings, settingsRoot, repaired = addon.Settings.Open(addon.database.ReadSettings())
         addon.database.BindSettings(settingsRoot)

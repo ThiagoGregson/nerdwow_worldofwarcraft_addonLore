@@ -51,9 +51,17 @@ function Controller.New(options)
             Close=function() if token==generation then controller.Close() end end,
             Error=function(fault,stage,context) if token==generation then controller.Fail(fault,stage,context) end end,
             NativeShown=function() if token==generation then controller.Schedule() end end,
+            Ready=function()
+                if token~=generation then return end
+                guard("font_ready",function()
+                    if not options.Platform.Defer(function()
+                        if token==generation then controller.Refresh(0,true) end
+                    end) then error("defer_unavailable") end
+                end)
+            end,
         }
     end
-    function controller.Refresh(retry)
+    function controller.Refresh(retry,fontsReady)
         retry=retry or 0
         generation=generation+1
         local token=generation
@@ -69,11 +77,12 @@ function Controller.New(options)
             if not addon.GossipDialogue.HasContent(model) then return true end
             lastModel=prepared
             view=options.View.New(callbacks(token))
-            local ready,code,context=view.Show(prepared)
+            local ready,code,context=view.Show(prepared,not fontsReady)
             extraContext=context
             -- Um callback síncrono pode ter executado o fallback dentro de Show.
             if failed or token~=generation then return false end
             if ready==false then
+                if code=="font_pending" then return true end
                 release()
                 if code=="layout_pending" and retry<3 then
                     token=generation

@@ -3,12 +3,15 @@ local View = {}
 addon.ConversationView = View
 local CIRCLE="Interface\\CHARACTERFRAME\\TempPortraitAlphaMask"
 local handle,root,callbacks,shown,model,speech
-local top,bottom,edgeLeft,edgeRight,crest,crestShadow,name,title,zone,subzone,hint,scroll,child,line,measure,exit
+local top,bottom,edgeLeft,edgeRight,crest,crestShadow,name,title,zone,subzone,hint,scroll,child,line,exit
 local optionScroll,optionChild,more
 local paragraphs,paragraphData={},{}
 local buttons={}
 local entrance,bottomHeight,layout=0,0,nil
 local preparing,faulted=false,false
+local waiting=false
+local measures={}
+local measureOrder={}
 local function rgb(hex)
     return tonumber(hex:sub(1,2),16)/255,tonumber(hex:sub(3,4),16)/255,tonumber(hex:sub(5,6),16)/255
 end
@@ -21,7 +24,8 @@ local function tint(object,hex,alpha)
     object:SetVertexColor(r,g,b,alpha or 1)
 end
 local function font(object,file,size)
-    addon.FontAPI.Apply(object,file,size)
+    local _,ready=addon.FontAPI.Apply(object,file,size)
+    if not ready then error("font_pending",0) end
     object:SetShadowColor(0,0,0,.9)
     object:SetShadowOffset(0,-1)
 end
@@ -71,9 +75,21 @@ local function button(index)
 end
 -- A medição tem uma região própria mostrada (alpha zero), nunca Hide().
 local function textWidth(text,file,size)
-    font(measure,file,size)
-    measure:SetText(text)
-    local width=measure:GetUnboundedStringWidth()
+    -- Never reuse a pending FontString for another font/size.
+    local key=file..":"..string.format("%.9g",size)
+    local meter=measures[key]
+    if not meter then
+        if #measureOrder>=128 then
+            local oldKey=table.remove(measureOrder,1); meter=measures[oldKey]; measures[oldKey]=nil
+        else
+            meter=label(root); meter:SetSize(100000,1000); meter:SetPoint("TOPLEFT",root,"TOPLEFT",0,0)
+            meter:SetWordWrap(false); meter:SetAlpha(0)
+        end
+        measures[key]=meter; measureOrder[#measureOrder+1]=key
+    end
+    font(meter,file,size)
+    meter:SetText(text)
+    local width=meter:GetUnboundedStringWidth()
     if type(width)=="number" and width>0 and width<math.huge then return width end
     local _,characters=text:gsub("[^\128-\191]","")
     return characters*size*.55
@@ -108,7 +124,9 @@ local function fit(object,text,file,size,minimum,maximum)
         text=text:sub(1,ends[low] or 0).."..."
     end
     object:SetWordWrap(false); object:SetNonSpaceWrap(false)
-    local used=math.min(maximum,math.max(1,textWidth(text,file,size)+2*layout.scale))
+    -- Give the client the available box, not a tight natural-width box that can
+    -- acquire an automatic ellipsis after glyph metrics or pixel rounding settle.
+    local used=math.min(maximum,math.max(1,math.ceil(textWidth(text,file,size)+size*.15+4*layout.scale)))
     local height=textHeight(object,text,file,size,used)
     return used,height
 end
@@ -131,9 +149,10 @@ local function place()
     layout=addon.Conversation.Layout(width,height,textWidth(addon.Conversation.LINE_SAMPLE,"EBGaramond-Regular",layout.speechSize))
     local widthText,left=layout.textWidth,layout.textLeft
     local titleText=model.npc and model.npc.title or ""
+    local titleSpace=titleText~="" and math.min(widthText*.36,textWidth(titleText,"EBGaramond-Italic",17*s)+14*s) or 0
     name:ClearAllPoints(); name:SetPoint("TOPLEFT",root,"BOTTOMLEFT",left,layout.bottom-18*s)
     local nameWidth,nameHeight=fit(name,model.npc and model.npc.name or addon.Text.cinemaUnknownNPC,
-        "Cinzel-Bold",layout.nameSize,14*s,titleText~="" and widthText*.64 or widthText)
+        "Cinzel-Bold",layout.nameSize,14*s,widthText-titleSpace)
     color(name,model.theme.glow)
     title:ClearAllPoints(); title:SetPoint("TOPLEFT",name,"TOPRIGHT",14*s,-3*s)
     local _,titleHeight=fit(title,titleText,"EBGaramond-Italic",17*s,13*s,math.max(1,widthText-nameWidth-14*s))
@@ -178,23 +197,26 @@ local function place()
         local tokenCallbacks=callbacks
         b:SetScript("OnClick",safe(function() tokenCallbacks.Choose(index) end))
         local text=entry.text and entry.text:find("%S") and entry.text or addon.Text.cinemaUnknownOption
-        local itemWidth=math.min(widthText,math.max(110*s,textWidth(text,"EBGaramond-Regular",layout.optionSize)+66*s))
+        local numberSize=layout.optionSize*.78
+        local diameter=numberSize*1.6
+        local labelLeft=diameter+28*s
+        local itemWidth=math.min(widthText,math.max(110*s,textWidth(text,"EBGaramond-Regular",layout.optionSize)+labelLeft+12*s))
         if x>0 and x+itemWidth>widthText then x=0; y=y-rowHeight-7*s; rowHeight=0 end
         b:ClearAllPoints(); b:SetPoint("TOPLEFT",optionChild,"TOPLEFT",x,y)
-        b.label:ClearAllPoints(); b.label:SetPoint("TOPLEFT",b,"TOPLEFT",54*s,-3*s)
+        b.label:ClearAllPoints(); b.label:SetPoint("TOPLEFT",b,"TOPLEFT",labelLeft,-3*s)
         b.label:SetWordWrap(true); b.label:SetNonSpaceWrap(true)
         color(b.label,entry.enabled and model.theme.option or model.theme.muted,entry.enabled and 1 or .6)
-        local itemHeight=math.max(28*s,textHeight(b.label,text,"EBGaramond-Regular",layout.optionSize,itemWidth-60*s)+8*s)
+        local itemHeight=math.max(diameter+8*s,textHeight(b.label,text,"EBGaramond-Regular",layout.optionSize,itemWidth-labelLeft-6*s)+8*s)
         b:SetSize(itemWidth,itemHeight)
         for _,circle in ipairs({b.ring,b.fill}) do circle:ClearAllPoints(); circle:SetPoint("TOPLEFT",b,"TOPLEFT",0,-4*s) end
-        b.ring:SetSize(22*s,22*s); tint(b.ring,model.theme.accent,.75)
-        b.fill:SetSize(20*s,20*s); b.fill:ClearAllPoints(); b.fill:SetPoint("CENTER",b.ring,"CENTER",0,0)
+        b.ring:SetSize(diameter,diameter); tint(b.ring,model.theme.accent,.75)
+        b.fill:SetSize(diameter-2*s,diameter-2*s); b.fill:ClearAllPoints(); b.fill:SetPoint("CENTER",b.ring,"CENTER",0,0)
         tint(b.fill,model.theme.night)
-        font(b.number,"Cinzel-Regular",12*s); color(b.number,model.theme.accent)
+        font(b.number,"Cinzel-Regular",numberSize); color(b.number,model.theme.accent)
         b.number:SetWordWrap(false); b.number:SetText(tostring(index)); b.number:SetJustifyH("CENTER"); b.number:SetJustifyV("MIDDLE")
-        b.number:ClearAllPoints(); b.number:SetPoint("TOPLEFT",b,"TOPLEFT",0,-4*s); b.number:SetSize(22*s,22*s)
-        b.icon:ClearAllPoints(); b.icon:SetPoint("TOPLEFT",b,"TOPLEFT",30*s,-6*s); b.icon:SetSize(16*s,16*s)
-        b.symbol:ClearAllPoints(); b.symbol:SetPoint("TOPLEFT",b,"TOPLEFT",30*s,-4*s); b.symbol:SetSize(20*s,26*s)
+        b.number:ClearAllPoints(); b.number:SetPoint("CENTER",b.ring,"CENTER",0,0); b.number:SetSize(diameter,diameter)
+        b.icon:ClearAllPoints(); b.icon:SetPoint("TOPLEFT",b,"TOPLEFT",diameter+8*s,-6*s); b.icon:SetSize(16*s,16*s)
+        b.symbol:ClearAllPoints(); b.symbol:SetPoint("TOPLEFT",b,"TOPLEFT",diameter+8*s,-4*s); b.symbol:SetSize(20*s,26*s)
         font(b.symbol,"Cinzel-Bold",18*s); b.symbol:SetWordWrap(false)
         color(b.symbol,entry.kind=="active" and model.theme.muted or model.theme.secondary)
         if entry.kind=="conversation" and entry.icon then
@@ -239,6 +261,14 @@ local function place()
     top:SetHeight(math.max(.01,layout.top*eased)); bottom:SetHeight(math.max(.01,bottomHeight*eased))
     return true
 end
+local function arrange()
+    local ok,value=addon.DiagnosticAPI.Try(place)
+    -- A partially prepared layout must never reveal the full typewriter text.
+    if speech then reveal(speech.GetText()) end
+    if ok then return value end
+    if value.message=="font_pending" then return false,"font_pending" end
+    addon.DiagnosticAPI.Raise(value,"interface_error")
+end
 local function update(_,delta)
     if entrance<.9 then
         entrance=math.min(.9,entrance+delta)
@@ -255,6 +285,14 @@ function View.New(newCallbacks)
     callbacks=newCallbacks
     if handle then return handle end
     root=CreateFrame("Frame",nil,UIParent); root:Hide(); root:SetAllPoints(UIParent)
+    addon.FontAPI.Watch(safe(function()
+        if preparing then return end
+        if waiting then waiting=false; if callbacks.Ready then callbacks.Ready() end
+        elseif shown and model then
+            local ready,code=arrange()
+            if ready==false and code~="font_pending" then error("layout_unavailable") end
+        end
+    end,"font_ready"))
     root:SetFrameStrata("DIALOG"); root:EnableMouse(false); root:EnableKeyboard(false)
     root:SetPropagateKeyboardInput(true)
     top,bottom=texture(root),texture(root)
@@ -274,8 +312,6 @@ function View.New(newCallbacks)
         scrollHint()
     end))
     line=label(child); paragraphs[1]=line
-    measure=label(root); measure:SetSize(100000,1000); measure:SetPoint("TOPLEFT",root,"TOPLEFT",0,0)
-    measure:SetWordWrap(false); measure:SetAlpha(0)
     optionScroll=CreateFrame("ScrollFrame",nil,root); optionChild=CreateFrame("Frame",nil,optionScroll)
     optionScroll:SetScrollChild(optionChild); optionScroll:EnableMouseWheel(true)
     optionScroll:SetScript("OnMouseWheel",safe(function(_,delta)
@@ -292,28 +328,47 @@ function View.New(newCallbacks)
     end))
     root:SetScript("OnKeyUp",safe(function() root:SetPropagateKeyboardInput(true) end))
     root:SetScript("OnSizeChanged",safe(function()
-        if not preparing and shown and place()==false then error("layout_unavailable") end
+        if not preparing and shown then
+            local ready,code=arrange()
+            if ready==false and code~="font_pending" then error("layout_unavailable") end
+        end
     end,"OnSizeChanged"))
     root:SetScript("OnShow",safe(function()
         if shown and model and not preparing then
-            if place()==false then error("layout_unavailable") end
+            local ready,code=arrange()
+            if ready==false and code~="font_pending" then error("layout_unavailable") end
             root:EnableKeyboard(true)
             if entrance<.9 or not speech.IsComplete() then root:SetScript("OnUpdate",safe(update)) end
         end
     end,"OnShow"))
     root:SetScript("OnHide",safe(function() root:SetScript("OnUpdate",nil); root:EnableKeyboard(false) end,"OnHide"))
     handle={}
-    function handle.Show(input)
-        faulted=false; preparing=false
+    function handle.Show(input,retryFonts)
+        faulted=false; preparing=false; waiting=false
+        if retryFonts~=false then addon.FontAPI.Retry() end
         model=input; speech=assert(addon.Conversation.NewSpeech(input.text)); entrance=0
         local viewport=dimensions()
-        if not addon.Conversation.Layout(viewport.viewportWidth,viewport.viewportHeight) then
+        local initial=addon.Conversation.Layout(viewport.viewportWidth,viewport.viewportHeight)
+        if not initial then
             shown=false; root:Hide(); return false,"layout_pending",viewport
         end
+        local s=initial.scale
+        -- Start the sizes needed by this layout together, so a missing asset has
+        -- one verification window instead of a separate wait for every label.
+        for _,request in ipairs({{"Cinzel-Bold",initial.nameSize},{"EBGaramond-Italic",17*s},
+            {"Cinzel-Regular",initial.zoneSize},{"EBGaramond-Regular",13*s},{"EBGaramond-Regular",12*s},
+            {"Cinzel-Regular",24*s},{"EBGaramond-Regular",initial.speechSize},
+            {"EBGaramond-Regular",initial.optionSize},{"Cinzel-Regular",initial.optionSize*.78},
+            {"Cinzel-Bold",18*s}}) do addon.FontAPI.Prepare(request[1],request[2]) end
         shown=true; preparing=true
         root:SetAlpha(0); root:Show(); preparing=false
         if faulted or not shown then return false,"view_failed",dimensions() end
-        if not place() then return false,"layout_pending",dimensions() end
+        local ready,code=arrange()
+        if not ready then
+            waiting=code=="font_pending"
+            shown=false; root:Hide()
+            return false,code or "layout_pending",dimensions()
+        end
         scroll:SetVerticalScroll(0)
         optionScroll:SetVerticalScroll(0); scrollHint()
         top:SetHeight(.01); bottom:SetHeight(.01)
@@ -324,7 +379,7 @@ function View.New(newCallbacks)
         return true,nil,dimensions()
     end
     function handle.Hide()
-        shown=false; preparing=false; root:SetScript("OnUpdate",nil); root:EnableKeyboard(false)
+        shown=false; preparing=false; waiting=false; root:SetScript("OnUpdate",nil); root:EnableKeyboard(false)
         root:SetPropagateKeyboardInput(true); root:Hide(); model,speech=nil,nil
     end
     function handle.Complete() if speech then reveal(speech.Complete()) end end

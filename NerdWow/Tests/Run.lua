@@ -343,7 +343,7 @@ local function client(saved, settings, absentSettings)
         debugstack = function() return debug.traceback("stack",2) end,
         time = function() return TIME end,
         SlashCmdList = {}, date = os.date, StaticPopupDialogs = {},
-        UIParent = false,
+        UIParent = false, GameFontNormal = {},
     }
     env.InCombatLockdown = function() return state.inCombat end
     env.C_UI = { Reload = function() state.reloads = state.reloads + 1 end }
@@ -410,7 +410,7 @@ local function client(saved, settings, absentSettings)
         if state.rewardHook then state.rewardHook(index) end
     end
     env.C_Timer = { After = function(delay, callback)
-        equal(delay, 0); state.timers[#state.timers + 1] = callback
+        assert(delay==0 or delay==.1); state.timers[#state.timers + 1] = callback
     end }
     env.C_GossipInfo = {
         GetText = function() return state.gossip.text end,
@@ -483,6 +483,10 @@ local function client(saved, settings, absentSettings)
         if frameType=="Frame" and parent==env.UIParent then
             local frame={shown=true}
             function frame:Hide() self.shown=false end
+            function frame:SetSize() end
+            function frame:SetPoint() end
+            function frame:SetAlpha(value) self.alpha=value end
+            function frame:EnableMouse(value) self.mouse=value end
             function frame:CreateFontString(_,layer,template)
                 equal(layer,"OVERLAY"); equal(template,"GameFontNormal")
                 local font={font="Fonts\\FRIZQT__.TTF",parent=self}
@@ -492,9 +496,27 @@ local function client(saved, settings, absentSettings)
                     state.fontCalls=state.fontCalls or {}
                     state.fontCalls[#state.fontCalls+1]={path=path,size=size,flags=flags}
                     if state.rejectFont and state.rejectFont(path,size,flags) then return false end
+                    if state.deferFont and path:find("NerdWow\\Fonts\\",1,true) then
+                        local token=(self.request or 0)+1; self.request=token
+                        state.timers[#state.timers+1]=function()
+                            if self.request==token then self.font,self.size,self.flags=path,size,flags end
+                        end
+                        return false
+                    end
                     self.font,self.size,self.flags=path,size,flags
                     return true
                 end
+                function font:GetFont() return self.font,self.size or 12,self.flags or "" end
+                function font:SetFontObject()
+                    self.request=(self.request or 0)+1; self.font,self.size,self.flags="Fonts\\FRIZQT__.TTF",12,""
+                end
+                function font:SetPoint() end
+                function font:SetSize() end
+                function font:SetWordWrap() end
+                function font:SetNonSpaceWrap() end
+                function font:SetText(text) self.text=text end
+                function font:GetUnboundedStringWidth() return #(self.text or "")*(self.size or 12)*.45 end
+                function font:GetStringHeight() return (self.size or 12)*1.4 end
                 frame.label=font
                 return font
             end
@@ -583,7 +605,7 @@ test("metadados e carregamento real do TOC", function()
     equal(metadata.Interface, "120105")
     equal(metadata.Title, "NerdWow")
     equal(metadata.Author, "Greg")
-    equal(metadata.Version, "0.6.4")
+    equal(metadata.Version, "0.6.5")
     equal(metadata.SavedVariables, "NerdWow_Journal, NerdWow_Settings, NerdWow_Diagnostics")
     equal(#order, 26)
     for _, path in ipairs(order) do assert(not path:find("Tests/", 1, true)) end
@@ -620,7 +642,7 @@ test("entrada, status pt-BR e ajuda", function()
     equal(events[2].type, "LOCATION_CHANGED")
     equal(events[2].timestamp, TIME)
     c.command()
-    assert(c.messages[1]:find("v0.6.4 | esquema 1 | 2 eventos", 1, true))
+    assert(c.messages[1]:find("v0.6.5 | esquema 1 | 2 eventos", 1, true))
     assert(c.messages[1]:find("mudança de local", 1, true))
     assert(c.messages[1]:find("UTC", 1, true))
     assert(c.messages[2]:find("/reload", 1, true))
@@ -1138,7 +1160,7 @@ test("dica mostra versão, totais, pendentes, UTC e instruções em pt-BR", func
     local c = client()
     c.start()
     local text = tooltipText(c)
-    for _, expected in ipairs({ "NerdWow v0.6.4", "Eventos no diário: 2",
+    for _, expected in ipairs({ "NerdWow v0.6.5", "Eventos no diário: 2",
         "Novos desta sessão aguardando gravação: 2", "Último evento:", "UTC",
         "Clique esquerdo: sincronizar", "Arraste com o botão esquerdo" }) do
         assert(text:find(expected, 1, true), expected)

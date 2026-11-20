@@ -344,8 +344,24 @@ end)
 
 -- Superfície estrita para executar o renderizador Lua real sem o cliente.
 -- Métricas de texto aproximadas: verifica ciclo de vida/ações, não acabamento.
-local function renderer(n)
-    local state={frames={},regions={},fontCalls={},badFont=false}
+local function renderer(n,asynchronous)
+    local state={frames={},regions={},fontCalls={},badFont=false,now=0,timers={},loaded={},metricReads={}}
+    function state.after(delay,callback) state.timers[#state.timers+1]={at=state.now+delay,callback=callback} end
+    function state.advance(delta)
+        state.now=state.now+delta
+        local count=0
+        while true do
+            local found
+            for index,timer in ipairs(state.timers) do if timer.at<=state.now then found=index; break end end
+            if not found then break end
+            local timer=table.remove(state.timers,found); timer.callback()
+            count=count+1; assert(count<10000,"timer sem limite")
+        end
+    end
+    function state.drain()
+        for _=1,2000 do if #state.timers==0 then return end; state.advance(.1) end
+        error("fontes não encerraram os timers")
+    end
     local make
     make=function(kind,parent)
         local f={kind=kind,parent=parent,shown=true,scripts={},alpha=1}
@@ -417,8 +433,24 @@ local function renderer(n)
             assert(flags==nil or flags=="" or flags=="OUTLINE","flags não simuladas")
             state.fontCalls[#state.fontCalls+1]={path=path,size=size,flags=flags}
             if state.badFont or (state.rejectFont and state.rejectFont(path,size,flags)) then return false end
-            self.font,self.size=path,size; return true
+            self.fontRequest=(self.fontRequest or 0)+1
+            local token=self.fontRequest
+            local response=state.fontBehavior and state.fontBehavior(path,size,flags,self)
+            if response then
+                if response.identityNow then self.font,self.size,self.flags=path,size,flags; self.metricFactor=response.factor or .3 end
+                state.after(response.delay,function()
+                    if token~=self.fontRequest then return end
+                    self.font,self.size,self.flags=path,size,flags; self.metricFactor=1; state.loaded[path]=true
+                end)
+                return response.success==true
+            end
+            self.font,self.size,self.flags=path,size,flags; return true
         end
+        function f:GetFont()
+            if state.getFont then return state.getFont(self) end
+            return self.font,self.size,self.flags or ""
+        end
+        function f:SetFontObject() self.font,self.size,self.flags="Fonts\\FRIZQT__.TTF",12,"" end
         function f:SetText(value)
             if self.kind=="FontString" and not self.font then error("FontString:SetText(): Font not set") end
             self.text=value
@@ -439,9 +471,10 @@ local function renderer(n)
         end
         local function naturalWidth(text)
             local _,characters=(text or ""):gsub("[^\128-\191]","")
-            return characters*(f.size or 16)*.45
+            return characters*(f.size or 16)*.45*(f.metricFactor or 1)
         end
         function f:GetUnboundedStringWidth()
+            state.metricReads[#state.metricReads+1]={path=self.font,size=self.size,text=self.text,at=state.now,factor=self.metricFactor}
             if not measurable(self) then return 0 end
             local width=0
             for part in ((self.text or "").."\n"):gmatch("([^\n]*)\n") do width=math.max(width,naturalWidth(part)) end
@@ -454,7 +487,7 @@ local function renderer(n)
             for part in ((self.text or "").."\n"):gmatch("([^\n]*)\n") do
                 lines=lines+(self.wrap==false and 1 or math.max(1,math.ceil(naturalWidth(part)/math.max(1,self:GetWidth()))))
             end
-            return lines*(self.size or 16)*1.4+math.max(0,lines-1)*(self.spacing or 0)
+            return (lines*(self.size or 16)*1.4+math.max(0,lines-1)*(self.spacing or 0))*(self.metricFactor or 1)
         end
         function f:SetScrollChild(value) self.child=value end
         function f:SetVerticalScroll(value) self.scroll=value end
@@ -467,18 +500,263 @@ local function renderer(n)
     local parent=make("UIParent"); parent:SetSize(1280,720)
     state.parent=parent
     local env={type=type,pairs=pairs,ipairs=ipairs,math=math,string=string,tonumber=tonumber,tostring=tostring,
-        pcall=pcall,error=error,assert=assert,UIParent=parent,xpcall=xpcall,unpack=unpack,select=select,setmetatable=setmetatable,
+        pcall=pcall,error=error,assert=assert,UIParent=parent,xpcall=xpcall,unpack=unpack,select=select,setmetatable=setmetatable,table=table,
         debugstack=function() return debug.traceback("stack",2) end,
         CreateColor=function(...) local color={...}; color.kind="Color"; return color end,
         CreateFrame=function(kind,_,frameParent)
             local frame=make(kind,frameParent); state.frames[#state.frames+1]=frame; return frame
         end}
+    if asynchronous then env.C_Timer={After=state.after} end
+    state.env=env
     t.loadModule("Locales/ptBR.lua",n,{})
     t.loadModule("Integration/Diagnostics.lua",n,env)
     t.loadModule("Integration/Fonts.lua",n,env)
     t.loadModule("Integration/ConversationView.lua",n,env)
     return state
 end
+
+local function dialogRoot(r)
+    for _,frame in ipairs(r.frames) do if frame.strata=="DIALOG" then return frame end end
+end
+local function delayed(r,delay,identityNow,factor)
+    r.fontBehavior=function(path)
+        if path:find("NerdWow\\Fonts\\",1,true) and not r.loaded[path] then
+            return {delay=delay,identityNow=identityNow,factor=factor}
+        end
+    end
+end
+
+test("false com GetFont embutido confirmado não é recusa nem dispara alternativa",function()
+    local n=core(); local r=renderer(n,true); local records={}
+    delayed(r,.5,true,1)
+    n.DiagnosticAPI.Bind(function(value) records[#records+1]=value end)
+    local object=r.parent:CreateFontString(nil,"OVERLAY","GameFontNormal")
+    local path,ready=n.FontAPI.Apply(object,"Cinzel-Bold",21)
+    equal(path,nil); equal(ready,false)
+    r.advance(.1)
+    path,ready=n.FontAPI.Apply(object,"Cinzel-Bold",21)
+    equal(ready,true); equal(object:GetFont(),path); assert(path:find("Cinzel-Bold.ttf",1,true))
+    r.drain(); equal(#records,0)
+    for _,call in ipairs(r.fontCalls) do assert(call.path:find("NerdWow\\Fonts\\",1,true)) end
+end)
+
+test("pré carregamento invisível aplica quatro fontes antes da conversa e termina os timers",function()
+    local n=core(); local r=renderer(n,true)
+    delayed(r,.5,false)
+    n.FontAPI.Preload(); n.FontAPI.Preload()
+    equal(#r.fontCalls,4); equal(#r.frames,1); equal(r.frames[1].alpha,0); equal(r.frames[1].mouse,false)
+    equal(r.frames[1].keyboard,nil); equal(r.frames[1].scripts.OnUpdate,nil)
+    r.drain(); equal(#r.fontCalls,4); equal(#r.timers,0)
+    for _,region in ipairs(r.regions) do assert(region.font:find("NerdWow\\Fonts\\",1,true)) end
+    local view=n.ConversationView.New({Error=function() error("view failure") end})
+    equal(view.Show(assert(n.Conversation.Build(model()))),true)
+end)
+
+test("conversa espera aplicação tardia sem suprimir Blizzard nem medir com fonte anterior",function()
+    local n=core(); local r=renderer(n,true); local p=platform(n); local reports=0
+    delayed(r,.6,false); n.FontAPI.Preload()
+    local source=model(); source.npc.name="Major Belmonte"; source.npc.title=""
+    source.location={zone="Vila Norte",subZone="Vale de Vila Norte"}
+    local c=n.ConversationController.New({GetModel=function() return source end,IsEnabled=function() return true end,
+        View=n.ConversationView,Platform=p.api,Report=function() reports=reports+1 end})
+    c.Refresh(); equal(dialogRoot(r).shown,false); equal(p.root.alpha,.75)
+    equal(dialogRoot(r).keyboard,false)
+    r.drain(); equal(reports,0); equal(dialogRoot(r).shown,true); equal(p.root.alpha,0)
+    for _,read in ipairs(r.metricReads) do
+        if read.text==source.npc.name or read.text==source.location.zone or read.text==source.location.subZone then
+            assert(read.path:find("NerdWow\\Fonts\\",1,true),"texto medido com a fonte anterior")
+        end
+    end
+    dialogRoot(r).scripts.OnUpdate(dialogRoot(r),1)
+    local found={}
+    for _,region in ipairs(r.regions) do if region.alpha~=0 and region.text then found[region.text]=region end end
+    assert(found["Major Belmonte"] and found["Vila Norte"] and found["Vale de Vila Norte"])
+    c.Close(); equal(dialogRoot(r).keyboard,false)
+end)
+
+test("métrica tardia refaz layout aberto sem reiniciar fala entrada alpha ou rolagem",function()
+    local n=core(); local r=renderer(n,true); local p=platform(n)
+    delayed(r,1.5,true,.45); n.FontAPI.Preload(); r.advance(.1)
+    local source=model(); source.text=string.rep("Uma memória completa para contar. ",100)
+    source.npc.name="Major Belmonte"; source.npc.title=""; source.location={zone="Vila Norte",subZone="Vale de Vila Norte"}
+    local created=0; local original=n.Conversation.NewSpeech
+    n.Conversation.NewSpeech=function(text) created=created+1; return original(text) end
+    local reports=0
+    local c=n.ConversationController.New({GetModel=function() return source end,IsEnabled=function() return true end,
+        View=n.ConversationView,Platform=p.api,Report=function() reports=reports+1 end})
+    c.Refresh()
+    for _=1,12 do if dialogRoot(r).shown then break end; r.advance(.1) end
+    local root=dialogRoot(r); equal(root.shown,true); assert(r.now<1.5)
+    root.scripts.OnUpdate(root,.95)
+    local speechScroll
+    for _,frame in ipairs(r.frames) do if frame.kind=="ScrollFrame" then speechScroll=frame; break end end
+    speechScroll.scripts.OnMouseWheel(speechScroll,-1)
+    local beforeScroll=speechScroll:GetVerticalScroll(); assert(beforeScroll>0)
+    local prefix,optionWidth,nameWidth
+    for _,region in ipairs(r.regions) do
+        if region.alpha~=0 and region.text and source.text:sub(1,#region.text)==region.text and #region.text>1 then prefix=region.text end
+        if region.parent.kind=="Button" and region.text=="Conte-me sua história." then optionWidth=region.parent.width end
+        if region.alpha~=0 and region.text=="Major Belmonte" then nameWidth=region.width end
+    end
+    assert(prefix and #prefix<#source.text)
+    local beforeCreated,beforeAlpha,update=created,root.alpha,root.scripts.OnUpdate
+    r.drain()
+    equal(reports,0); equal(created,beforeCreated); equal(root.alpha,beforeAlpha); equal(root.scripts.OnUpdate,update)
+    equal(speechScroll:GetVerticalScroll(),beforeScroll)
+    local found=false
+    for _,region in ipairs(r.regions) do
+        if region.text==prefix then found=true end
+        if region.alpha~=0 and region.text=="Major Belmonte" then assert(region.width>nameWidth); assert(region.width>=region:GetUnboundedStringWidth()) end
+        if region.parent.kind=="Button" and region.text=="Conte-me sua história." then assert(region.parent.width>optionWidth) end
+    end
+    assert(found); c.Complete(); equal(root.shown,true)
+    local all=false; for _,region in ipairs(r.regions) do if region.text==source.text then all=true end end
+    assert(all); c.Close()
+end)
+
+test("GetFont correto com métricas zero aguarda a métrica final sem fallback nativo",function()
+    local n=core(); local r=renderer(n,true); local p=platform(n); local reports=0
+    delayed(r,.8,true,0)
+    local c=n.ConversationController.New({GetModel=model,IsEnabled=function() return true end,
+        View=n.ConversationView,Platform=p.api,Report=function() reports=reports+1 end})
+    c.Refresh(); r.advance(.4)
+    equal(p.root.alpha,.75); equal(dialogRoot(r).shown,false)
+    r.drain(); equal(reports,0); equal(p.root.alpha,0)
+    for _,call in ipairs(r.fontCalls) do assert(call.path:find("NerdWow\\Fonts\\",1,true)) end
+    c.Close()
+end)
+
+test("não aplicação persistente usa alternativa só depois da janela de verificação",function()
+    local n=core(); local r=renderer(n,true); local records={}
+    r.rejectFont=function(path) return path:find("NerdWow\\Fonts\\",1,true)~=nil end
+    n.DiagnosticAPI.Bind(function(value) records[#records+1]=value end)
+    local object=r.parent:CreateFontString(nil,"OVERLAY","GameFontNormal")
+    local path,ready=n.FontAPI.Apply(object,"EBGaramond-Regular",21)
+    equal(path,nil); equal(ready,false)
+    for _=1,40 do r.advance(.1) end
+    equal(#records,0); equal(#r.fontCalls,1)
+    r.drain()
+    path,ready=n.FontAPI.Apply(object,"EBGaramond-Regular",21)
+    equal(path,"Fonts\\ARIALN.TTF"); equal(ready,true); equal(object:GetFont(),path)
+    equal(#records,1); equal(records[1].code,"font_fallback")
+    assert(records[1].message:find("; applied=false",1,true))
+    r.drain(); equal(#r.timers,0)
+end)
+
+test("recusa embutida e nativa após espera continua falha explícita sem fonte inventada",function()
+    local n=core(); local r=renderer(n,true); local records={}; r.badFont=true
+    n.DiagnosticAPI.Bind(function(value) records[#records+1]=value end)
+    local object=r.parent:CreateFontString(nil,"OVERLAY","GameFontNormal")
+    equal(select(2,n.FontAPI.Apply(object,"Cinzel-Bold",21)),false)
+    r.drain()
+    local ok,err=pcall(n.FontAPI.Apply,object,"Cinzel-Bold",21)
+    equal(ok,false); assert(err:find("font_unavailable",1,true))
+    equal(#records,1); equal(records[1].code,"font_fallback_failed")
+end)
+
+test("fechar ou trocar conversa invalida notificação de fonte pendente",function()
+    for _,action in ipairs({"close","replace"}) do
+        local n=core(); local r=renderer(n,true); local p=platform(n); local reports=0
+        delayed(r,.7,false)
+        local source=model()
+        local c=n.ConversationController.New({GetModel=function() return source end,IsEnabled=function() return true end,
+            View=n.ConversationView,Platform=p.api,Report=function() reports=reports+1 end})
+        c.Refresh(); equal(dialogRoot(r).shown,false)
+        if action=="replace" then source=nil; c.Refresh() else c.Handle("GOSSIP_CLOSED") end
+        r.drain(); equal(dialogRoot(r).shown,false); equal(dialogRoot(r).keyboard,false)
+        equal(p.root.alpha,.75); equal(reports,0)
+    end
+end)
+
+test("número e círculo seguem proporção do mockup com centros comuns em escalas distintas",function()
+    for _,size in ipairs({{1280,720},{3440,1440},{5120/.8,1440/.8}}) do
+        local n=core(); local r=renderer(n); r.parent:SetSize(size[1],size[2])
+        local view=n.ConversationView.New({Error=function() error("view failure") end})
+        equal(view.Show(assert(n.Conversation.Build(model()))),true)
+        local number,label
+        for _,region in ipairs(r.regions) do
+            if region.text=="4" then number=region end
+            if region.text=="Conte-me sua história." then label=region end
+        end
+        assert(number and label); equal(number.size,label.size*.78); equal(number.width,number.size*1.6)
+        equal(number.height,number.width); equal(number.justifyH,"CENTER"); equal(number.justifyV,"MIDDLE")
+        local anchor=number.points[1]; equal(anchor[1],"CENTER"); equal(anchor[3],"CENTER")
+        equal(anchor[2].width,number.width); equal(anchor[2].height,number.height)
+    end
+end)
+
+test("fallback adiado conclui o cinema sem ciclo de retry e nova conversa recupera embutidas",function()
+    local n=core(); local r=renderer(n,true); local p=platform(n); local records={}; local reports=0
+    r.rejectFont=function(path) return path:find("NerdWow\\Fonts\\",1,true)~=nil end
+    n.DiagnosticAPI.Bind(function(value) records[#records+1]=value end)
+    local c=n.ConversationController.New({GetModel=model,IsEnabled=function() return true end,
+        View=n.ConversationView,Platform=p.api,Report=function() reports=reports+1 end})
+    c.Refresh(); equal(p.root.alpha,.75)
+    for _=1,55 do r.advance(.1) end
+    equal(reports,0); equal(dialogRoot(r).shown,true); equal(p.root.alpha,0); equal(#records,4)
+    for _,region in ipairs(r.regions) do
+        if region.kind=="FontString" then assert(region.font=="Fonts\\FRIZQT__.TTF" or region.font=="Fonts\\ARIALN.TTF") end
+    end
+    r.drain(); equal(#r.timers,0)
+    r.rejectFont=nil; c.Refresh(); r.drain()
+    equal(reports,0); equal(dialogRoot(r).shown,true); equal(#records,4)
+    for _,region in ipairs(r.regions) do
+        if region.kind=="FontString" then assert(region.font:find("NerdWow\\Fonts\\",1,true)) end
+    end
+    c.Close()
+end)
+
+test("fonte tardia mantém Major zona e subzona completas nas quatro resoluções e escalas",function()
+    for _,size in ipairs({{1920,1080},{2560,1440},{3440,1440},{5120,1440}}) do
+        for _,scale in ipairs({.64,.8,1,1.25}) do
+            local n=core(); local r=renderer(n,true); r.parent:SetSize(size[1]/scale,size[2]/scale)
+            delayed(r,.5,false); n.FontAPI.Preload(); r.drain()
+            local source=model(); source.npc.name="Major Belmonte"; source.npc.title=""
+            source.location={zone="Vila Norte",subZone="Vale de Vila Norte"}
+            local view=n.ConversationView.New({Error=function() error("view failure") end})
+            equal(view.Show(assert(n.Conversation.Build(source))),true)
+            dialogRoot(r).scripts.OnUpdate(dialogRoot(r),1)
+            for _,text in ipairs({source.npc.name,source.location.zone,source.location.subZone}) do
+                local found=false
+                for _,region in ipairs(r.regions) do
+                    if region.alpha~=0 and region.text==text then
+                        found=true; assert(region.width>=region:GetUnboundedStringWidth())
+                        assert(region.height>=region:GetStringHeight()); assert(region.wrap==false)
+                    end
+                end
+                assert(found,"texto cortado com espaço disponível: "..text)
+            end
+            view.Hide(); r.drain()
+        end
+    end
+end)
+
+test("GetFont restrito não é sucesso nem prova de recusa e conserva a causa",function()
+    local n=core(); local r=renderer(n,true); local secret={}
+    r.env.issecretvalue=function(value) return value==secret end
+    r.getFont=function() return secret,21,"" end
+    local object=r.parent:CreateFontString(nil,"OVERLAY","GameFontNormal")
+    equal(select(2,n.FontAPI.Apply(object,"Cinzel-Regular",21)),false)
+    r.drain()
+    local ok,fault=n.DiagnosticAPI.Try(n.FontAPI.Apply,object,"Cinzel-Regular",21)
+    equal(ok,false); assert(fault.message:find("restricted_font_result",1,true)); assert(fault.stack)
+    for _,call in ipairs(r.fontCalls) do assert(call.path:find("NerdWow\\Fonts\\",1,true)) end
+end)
+
+test("identidade compara caminho normalizado tamanho e flags em vez de confiar em true",function()
+    local n=core(); local r=renderer(n,true)
+    r.getFont=function(object) return object.font:gsub("\\","/"):upper(),object.size,object.flags or "" end
+    local object=r.parent:CreateFontString(nil,"OVERLAY","GameFontNormal")
+    local path,ready=n.FontAPI.Apply(object,"Cinzel-Regular",21)
+    equal(ready,true); assert(path:find("Cinzel-Regular.ttf",1,true))
+    r.drain()
+    n=core(); r=renderer(n,true)
+    r.getFont=function(object) return object.font,12,"OUTLINE" end
+    object=r.parent:CreateFontString(nil,"OVERLAY","GameFontNormal")
+    path,ready=n.FontAPI.Apply(object,"Cinzel-Regular",21)
+    equal(ready,false); equal(path,nil)
+    r.drain(); equal(pcall(n.FontAPI.Apply,object,"Cinzel-Regular",21),false)
+end)
 
 test("renderizador real limita teclado animação e fala ao ciclo da conversa",function()
     local n=core(); local p=platform(n); local r=renderer(n); local reports=0
@@ -785,11 +1063,13 @@ test("teste de fontes durante cinema não altera texto teclado animação nem di
     for index,region in ipairs(r.regions) do originalFonts[index]={font=region.font,text=region.text} end
     clientState.command("fontes")
     equal(root.shown,true); equal(root.keyboard,true); equal(root.scripts.OnUpdate,update); equal(p.root.alpha,0)
-    equal(r.frames[#r.frames].shown,false)
+    local invisible=false
+    for _,frame in ipairs(r.frames) do if frame.alpha==0 and frame.mouse==false then invisible=true end end
+    assert(invisible)
     for index,original in ipairs(originalFonts) do
         equal(r.regions[index].font,original.font); equal(r.regions[index].text,original.text)
     end
-    equal(t.serialize(clientState.saved()),before); equal(#clientState.diagnostics().entries,18)
+    equal(t.serialize(clientState.saved()),before); equal(#clientState.diagnostics().entries,36)
     equal(reports,0); c.Close(); equal(p.root.alpha,.75)
 end)
 
@@ -919,7 +1199,7 @@ test("medidor mostrado e fallback de métricas zero mantêm opções completas c
         equal(optionLabel.text,source.options[1].text); assert(optionLabel.width>500)
         assert(optionLabel.height>optionLabel.size*1.4)
         assert(optionLabel.parent.height>=optionLabel.height+8)
-        equal(numberLabel.width,22); equal(numberLabel.height,22)
+        equal(numberLabel.width,18*.78*1.6); equal(numberLabel.height,numberLabel.width)
         equal(optionLabel.parent.parent,r.frames[5])
     end
 end)
@@ -987,7 +1267,8 @@ test("fonte que não carrega aciona fallback antes de suprimir apresentação na
     c.Refresh(); equal(reports,1); equal(p.root.alpha,.75)
     equal(r.frames[1].shown,false); equal(r.frames[1].keyboard,false)
     equal(r.frames[1].scripts.OnUpdate,nil)
-    equal(#records,1); equal(records[1].code,"font_fallback_failed")
+    equal(#records,4)
+    for _,record in ipairs(records) do equal(record.code,"font_fallback_failed") end
     assert(records[1].message:find("fallbackSuccess=false",1,true))
 end)
 

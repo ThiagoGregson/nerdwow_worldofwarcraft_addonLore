@@ -480,6 +480,28 @@ local function client(saved, settings, absentSettings)
         state.messages[#state.messages + 1] = message
     end }
     env.CreateFrame = function(frameType, name, parent)
+        if frameType=="Frame" and parent==env.UIParent then
+            local frame={shown=true}
+            function frame:Hide() self.shown=false end
+            function frame:CreateFontString(_,layer,template)
+                equal(layer,"OVERLAY"); equal(template,"GameFontNormal")
+                local font={font="Fonts\\FRIZQT__.TTF",parent=self}
+                function font:SetFont(path,size,flags)
+                    assert(type(path)=="string" and type(size)=="number" and size>0)
+                    assert(flags==nil or flags=="" or flags=="OUTLINE")
+                    state.fontCalls=state.fontCalls or {}
+                    state.fontCalls[#state.fontCalls+1]={path=path,size=size,flags=flags}
+                    if state.rejectFont and state.rejectFont(path,size,flags) then return false end
+                    self.font,self.size,self.flags=path,size,flags
+                    return true
+                end
+                frame.label=font
+                return font
+            end
+            state.fontFrames=state.fontFrames or {}
+            state.fontFrames[#state.fontFrames+1]=frame
+            return frame
+        end
         if frameType == "Button" then
             equal(name, nil); equal(parent, env.Minimap)
             local button = { scripts = {}, textures = {}, shown = true }
@@ -561,9 +583,9 @@ test("metadados e carregamento real do TOC", function()
     equal(metadata.Interface, "120105")
     equal(metadata.Title, "NerdWow")
     equal(metadata.Author, "Greg")
-    equal(metadata.Version, "0.6.2")
+    equal(metadata.Version, "0.6.3")
     equal(metadata.SavedVariables, "NerdWow_Journal, NerdWow_Settings, NerdWow_Diagnostics")
-    equal(#order, 25)
+    equal(#order, 26)
     for _, path in ipairs(order) do assert(not path:find("Tests/", 1, true)) end
     local c = client()
     equal(c.env.SLASH_NERDWOW1, "/nerdwow")
@@ -598,7 +620,7 @@ test("entrada, status pt-BR e ajuda", function()
     equal(events[2].type, "LOCATION_CHANGED")
     equal(events[2].timestamp, TIME)
     c.command()
-    assert(c.messages[1]:find("v0.6.2 | esquema 1 | 2 eventos", 1, true))
+    assert(c.messages[1]:find("v0.6.3 | esquema 1 | 2 eventos", 1, true))
     assert(c.messages[1]:find("mudança de local", 1, true))
     assert(c.messages[1]:find("UTC", 1, true))
     assert(c.messages[2]:find("/reload", 1, true))
@@ -1116,7 +1138,7 @@ test("dica mostra versão, totais, pendentes, UTC e instruções em pt-BR", func
     local c = client()
     c.start()
     local text = tooltipText(c)
-    for _, expected in ipairs({ "NerdWow v0.6.2", "Eventos no diário: 2",
+    for _, expected in ipairs({ "NerdWow v0.6.3", "Eventos no diário: 2",
         "Novos desta sessão aguardando gravação: 2", "Último evento:", "UTC",
         "Clique esquerdo: sincronizar", "Arraste com o botão esquerdo" }) do
         assert(text:find(expected, 1, true), expected)

@@ -345,7 +345,7 @@ end)
 -- Superfície estrita para executar o renderizador Lua real sem o cliente.
 -- Métricas de texto aproximadas: verifica ciclo de vida/ações, não acabamento.
 local function renderer(n)
-    local state={frames={},regions={},badFont=false}
+    local state={frames={},regions={},fontCalls={},badFont=false}
     local make
     make=function(kind,parent)
         local f={kind=kind,parent=parent,shown=true,scripts={},alpha=1}
@@ -410,10 +410,12 @@ local function renderer(n)
             assert(self.parent==value.parent,"superfície de teste exige o mesmo pai para máscara")
             self.mask=value
         end
-        function f:SetFont(path,size)
+        function f:SetFont(path,size,flags)
             assert(kind=="FontString" and type(path)=="string" and path~="")
             assert(type(size)=="number" and size>0 and size<math.huge)
-            if state.badFont then return false end
+            assert(flags==nil or flags=="" or flags=="OUTLINE","flags não simuladas")
+            state.fontCalls[#state.fontCalls+1]={path=path,size=size,flags=flags}
+            if state.badFont or (state.rejectFont and state.rejectFont(path,size,flags)) then return false end
             self.font,self.size=path,size; return true
         end
         function f:SetText(value)
@@ -449,6 +451,7 @@ local function renderer(n)
         end}
     t.loadModule("Locales/ptBR.lua",n,{})
     t.loadModule("Integration/Diagnostics.lua",n,env)
+    t.loadModule("Integration/Fonts.lua",n,env)
     t.loadModule("Integration/ConversationView.lua",n,env)
     return state
 end
@@ -659,14 +662,121 @@ test("pós-hook nativo só agenda sem executar transação dentro do handler Bli
     callback(); equal(#s.queued,0) -- geração antiga não reaplica a interface.
 end)
 
+test("layout aplica fontes sem contorno com flags nil e não faz aquecimento automático",function()
+    local n=core(); local r=renderer(n)
+    equal(#r.fontCalls,0)
+    local view=n.ConversationView.New({Error=function() error("view failure") end})
+    equal(#r.fontCalls,0)
+    equal(view.Show(assert(n.Conversation.Build(model()))),true)
+    equal(r.fontCalls[1].path,"Interface\\AddOns\\NerdWow\\Fonts\\Cinzel-Bold.ttf")
+    equal(r.fontCalls[1].size,21)
+    for _, call in ipairs(r.fontCalls) do equal(call.flags,nil); assert(call.size>=8) end
+end)
+
+test("recusa só de Cinzel Bold troca o nome pela fonte nativa e preserva as demais",function()
+    local n=core(); local r=renderer(n); local records={}
+    n.DiagnosticAPI.Bind(function(entry) records[#records+1]=entry end)
+    r.rejectFont=function(path) return path:find("Cinzel-Bold.ttf",1,true)~=nil end
+    local view=n.ConversationView.New({Error=function() error("view failure") end})
+    equal(view.Show(assert(n.Conversation.Build(model()))),true)
+    local found=false
+    for _, region in ipairs(r.regions) do
+        if region.text=="Arquivista Velann" then equal(region.font,"Fonts\\FRIZQT__.TTF"); found=true end
+        if region.text=="Guardiã dos registros" then assert(region.font:find("EBGaramond-Italic.ttf",1,true)) end
+    end
+    assert(found); equal(#records,1); equal(records[1].code,"font_fallback")
+    assert(records[1].message:find("success=false; fallback=Fonts\\FRIZQT__.TTF; fallbackSuccess=true",1,true))
+end)
+
+test("recusa de todos os TTF embutidos mantém cinema teclado fala e seleção com fontes nativas",function()
+    local n=core(); local p=platform(n); local r=renderer(n); local reports=0
+    r.rejectFont=function(path) return path:find("NerdWow\\Fonts\\",1,true)~=nil end
+    local c=n.ConversationController.New({GetModel=model,IsEnabled=function() return true end,
+        View=n.ConversationView,Platform=p.api,Report=function() reports=reports+1 end})
+    c.Refresh(); equal(reports,0); equal(p.root.alpha,0); equal(r.frames[1].shown,true)
+    equal(r.frames[1].keyboard,true)
+    local titleFound,bodyFound=false,false
+    for _, region in ipairs(r.regions) do
+        if region.kind=="FontString" then
+            assert(region.font=="Fonts\\FRIZQT__.TTF" or region.font=="Fonts\\ARIALN.TTF")
+            if region.text=="Arquivista Velann" then equal(region.font,"Fonts\\FRIZQT__.TTF"); titleFound=true end
+            if region.text=="Conte-me sua história." then equal(region.font,"Fonts\\ARIALN.TTF"); bodyFound=true end
+        end
+    end
+    assert(titleFound and bodyFound)
+    r.frames[1].scripts.OnKeyDown(r.frames[1],"SPACE"); equal(r.frames[1].propagate,false)
+    r.frames[1].scripts.OnKeyDown(r.frames[1],"4"); equal(p.action,"SelectOption"); equal(p.value,7001)
+    c.Close(); equal(r.frames[1].keyboard,false); equal(p.root.alpha,.75); equal(reports,0)
+end)
+
+test("fallback é registrado uma vez por arquivo na sessão sem impedir nova tentativa da fonte",function()
+    local n=core(); local r=renderer(n); local records={}
+    n.DiagnosticAPI.Bind(function(entry) records[#records+1]=entry end)
+    r.rejectFont=function(path) return path:find("NerdWow\\Fonts\\",1,true)~=nil end
+    local view=n.ConversationView.New({Error=function() error("view failure") end})
+    for _=1,3 do equal(view.Show(assert(n.Conversation.Build(model()))),true); view.Hide() end
+    equal(#records,4)
+    r.rejectFont=nil
+    equal(view.Show(assert(n.Conversation.Build(model()))),true)
+    for _, region in ipairs(r.regions) do
+        if region.kind=="FontString" then assert(region.font:find("NerdWow\\Fonts\\",1,true)) end
+    end
+    equal(#records,4)
+end)
+
+test("exceção na fonte embutida usa alternativa e conserva a causa e a pilha",function()
+    local n=core(); local r=renderer(n); local records={}
+    n.DiagnosticAPI.Bind(function(entry) records[#records+1]=entry end)
+    r.rejectFont=function(path) if path:find("Cinzel-Bold.ttf",1,true) then error("font_asset_error") end end
+    local view=n.ConversationView.New({Error=function() error("view failure") end})
+    equal(view.Show(assert(n.Conversation.Build(model()))),true)
+    equal(#records,1); equal(records[1].code,"font_fallback")
+    assert(records[1].message:find("font_asset_error",1,true)); assert(records[1].stack)
+end)
+
+test("fallback mantém altura proporcional e mínimo de oito com flags nil",function()
+    local n=core(); local r=renderer(n)
+    r.rejectFont=function(path) return path:find("NerdWow\\Fonts\\",1,true)~=nil end
+    local object=r.parent:CreateFontString(nil,"OVERLAY","GameFontNormal")
+    for _, size in ipairs({4,21,31.5}) do
+        n.FontAPI.Apply(object,"EBGaramond-Regular",size)
+        equal(object.font,"Fonts\\ARIALN.TTF"); equal(object.size,math.max(8,size))
+        local requested,native=r.fontCalls[#r.fontCalls-1],r.fontCalls[#r.fontCalls]
+        equal(requested.size,native.size); equal(requested.flags,nil); equal(native.flags,nil)
+    end
+end)
+
+test("teste de fontes durante cinema não altera texto teclado animação nem diário",function()
+    local clientState=client(); clientState.start()
+    local n=clientState.namespace; local p=platform(n); local r=renderer(n)
+    n.DiagnosticAPI.Bind(assert(n.Diagnostics.Open(clientState.diagnostics())).Append)
+    local reports=0
+    local c=n.ConversationController.New({GetModel=model,IsEnabled=function() return true end,
+        View=n.ConversationView,Platform=p.api,Report=function() reports=reports+1 end})
+    c.Refresh(); local root=r.frames[1]; local update=root.scripts.OnUpdate
+    local before=t.serialize(clientState.saved()); local originalFonts={}
+    for index,region in ipairs(r.regions) do originalFonts[index]={font=region.font,text=region.text} end
+    clientState.command("fontes")
+    equal(root.shown,true); equal(root.keyboard,true); equal(root.scripts.OnUpdate,update); equal(p.root.alpha,0)
+    equal(r.frames[#r.frames].shown,false)
+    for index,original in ipairs(originalFonts) do
+        equal(r.regions[index].font,original.font); equal(r.regions[index].text,original.text)
+    end
+    equal(t.serialize(clientState.saved()),before); equal(#clientState.diagnostics().entries,18)
+    equal(reports,0); c.Close(); equal(p.root.alpha,.75)
+end)
+
 test("fonte que não carrega aciona fallback antes de suprimir apresentação nativa",function()
     local n=core(); local p=platform(n); local r=renderer(n); r.badFont=true
-    local reports=0
+    local reports=0; local records={}
+    n.DiagnosticAPI.Bind(function(entry) records[#records+1]=entry end)
     local c=n.ConversationController.New({GetModel=model,IsEnabled=function() return true end,
         View=n.ConversationView,Platform=p.api,Report=function() reports=reports+1 end})
     c.Refresh(); equal(reports,1); equal(p.root.alpha,.75)
     equal(r.frames[1].shown,false); equal(r.frames[1].keyboard,false)
     equal(r.frames[1].scripts.OnUpdate,nil)
+    equal(#records,1); equal(records[1].code,"font_fallback_failed")
+    assert(records[1].message:find("fallbackSuccess=false",1,true))
 end)
 
 test("erro de animação é contido e restaura interface sem deixar teclado ativo",function()

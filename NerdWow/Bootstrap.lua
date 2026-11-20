@@ -156,6 +156,16 @@ Wow.RegisterCommand(function(message)
         Wow.RequestSync()
         return
     end
+    if argument == "fontes" then
+        if not initialized then Wow.Print(Text.fontsNotReady); return end
+        local ok,fault=addon.DiagnosticAPI.Try(addon.FontAPI.Test,Wow.Print)
+        if not ok then
+            addon.DiagnosticAPI.Record("interface","font_test_failed",fault,{gameEvent="COMMAND_FONTES",stage="font_probe"})
+            Wow.Print(Text.fontsFailed)
+        end
+        if not diagnostics then Wow.Print(string.format(Text.diagnosticsBlocked,reason(diagnosticCode))) end
+        return
+    end
     if argument == "diagnostico" then
         if not diagnostics then Wow.Print(string.format(Text.diagnosticsBlocked,reason(diagnosticCode or "not_initialized"))); return end
         local recent=diagnostics.Recent(5)

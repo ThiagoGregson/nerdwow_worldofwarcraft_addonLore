@@ -57,7 +57,7 @@ test("barreira preserva mensagem textual e stack antes de desenrolar a pilha",fu
     c.namespace.DiagnosticAPI.Record("interface","interface_error",fault,{gameEvent="GOSSIP_SHOW",stage="show"},
         {moment="GOSSIP",npc={creatureID=197}})
     local saved=recent(c)
-    equal(saved.message,fault.message); equal(saved.stack,fault.stack); equal(saved.version,"0.6.2")
+    equal(saved.message,fault.message); equal(saved.stack,fault.stack); equal(saved.version,"0.6.3")
     equal(saved.context.gameEvent,"GOSSIP_SHOW"); equal(saved.context.moment,"GOSSIP"); equal(saved.context.creatureID,197)
     equal(saved.timestamp,c.time)
 end)
@@ -269,4 +269,75 @@ test("silêncio da zona não elimina histórico nem esconde erro real de captura
     c.fire("ZONE_CHANGED")
     equal(recent(c).code,"api_error"); assert(recent(c).message:find("location_original_error",1,true))
     assert(recent(c).stack); equal(recent(c).context.captureType,"LOCATION_CHANGED")
+end)
+
+test("comando fontes cobre dezoito combinações e persiste resultados sem mudar diário ou configuração",function()
+    local c=client(); c.start()
+    local journal,settings=t.serialize(c.saved()),t.serialize(c.settings())
+    c.command(" FONTES ")
+    equal(#c.messages,7); equal(#c.fontCalls,18); equal(#c.diagnostics().entries,18)
+    equal(#c.fontFrames,1); equal(c.fontFrames[1].shown,false)
+    local paths,combinations={},{}
+    for index,call in ipairs(c.fontCalls) do
+        equal(call.size,21)
+        local flags=call.flags==nil and "nil" or '"'..call.flags..'"'
+        local key=call.path..":"..flags; assert(not combinations[key]); combinations[key]=true; paths[call.path]=true
+        local entry=c.diagnostics().entries[index]
+        equal(entry.code,"font_test"); equal(entry.category,"interface"); equal(entry.version,"0.6.3")
+        equal(entry.context.gameEvent,"COMMAND_FONTES"); equal(entry.context.stage,"font_probe")
+        equal(entry.message,"font="..call.path.."; flags="..flags.."; size=21; success=true")
+    end
+    local count=0; for _ in pairs(paths) do count=count+1 end; equal(count,6)
+    assert(paths["Fonts\\FRIZQT__.TTF"]); assert(paths["Fonts\\ARIALN.TTF"])
+    for index=2,7 do assert(c.messages[index]:find('nil=OK | ""=OK | OUTLINE=OK',1,true)) end
+    equal(t.serialize(c.saved()),journal); equal(t.serialize(c.settings()),settings)
+    c.command("ajuda"); assert(c.messages[8]:find("/nerdwow fontes",1,true))
+    local handle=assert(c.namespace.Diagnostics.Open(t.roundtrip(c.diagnostics())))
+    equal(handle.GetStatus().total,18)
+end)
+
+test("teste de fontes distingue flags recusadas e exceções sem aplicar fallback ou interromper combinações",function()
+    local c=client(); c.start()
+    c.rejectFont=function(path,size,flags)
+        if flags=="OUTLINE" and path:find("Cinzel-Bold",1,true) then error("probe_original_error") end
+        return flags==""
+    end
+    c.command("fontes")
+    equal(#c.fontCalls,18); equal(#c.diagnostics().entries,18)
+    local rejected,exceptions=0,0
+    for index,entry in ipairs(c.diagnostics().entries) do
+        local call=c.fontCalls[index]
+        if call.flags=="" then
+            rejected=rejected+1; assert(entry.message:find('flags=""; size=21; success=false',1,true))
+        elseif entry.message:find("probe_original_error",1,true) then
+            exceptions=exceptions+1; assert(entry.stack); assert(entry.message:find("success=false",1,true))
+        else assert(entry.message:find("success=true",1,true)) end
+    end
+    equal(rejected,6); equal(exceptions,1)
+    assert(c.messages[3]:find('nil=OK | ""=recusada | OUTLINE=erro',1,true))
+end)
+
+test("teste repete chamadas reais reutiliza probe oculto e respeita retenção existente",function()
+    local c=client(); c.start()
+    c.namespace.DiagnosticAPI.Record("interface","interface_error",{message="histórico preservado"})
+    c.command("fontes"); equal(c.diagnostics().entries[1].message,"histórico preservado")
+    c.command("fontes"); c.command("fontes")
+    equal(#c.fontFrames,1); equal(#c.fontCalls,54); equal(#c.diagnostics().entries,50)
+    equal(c.diagnostics().schemaVersion,1)
+end)
+
+test("diagnóstico bloqueado não impede teste de fontes nem altera raiz preservada",function()
+    local c=client()
+    c.env.NerdWow_Diagnostics={schemaVersion=9,entries={},extra="guardar"}
+    local before=t.serialize(c.env.NerdWow_Diagnostics)
+    c.start(); c.command("fontes")
+    equal(#c.fontCalls,18); equal(t.serialize(c.env.NerdWow_Diagnostics),before)
+    assert(c.messages[#c.messages]:find("Diagnóstico indisponível",1,true))
+end)
+
+test("comando fontes exige inicialização e funciona com diário suspenso",function()
+    local c=client({schemaVersion=99})
+    c.command("fontes"); equal(c.fontCalls,nil); assert(c.messages[1]:find("ainda não inicializado",1,true))
+    c.start(); c.command("fontes")
+    equal(#c.fontCalls,18); equal(c.saved().schemaVersion,99)
 end)

@@ -1,7 +1,6 @@
 local _, addon = ...
 local View = {}
 addon.ConversationView = View
-local FONT="Interface\\AddOns\\NerdWow\\Fonts\\"
 local CIRCLE="Interface\\CHARACTERFRAME\\TempPortraitAlphaMask"
 local handle,root,callbacks,shown,model,speech
 local top,bottom,edgeLeft,edgeRight,crest,crestShadow,name,title,zone,subzone,hint,scroll,child,line,measure,exit
@@ -20,7 +19,7 @@ local function tint(object,hex,alpha)
     object:SetVertexColor(r,g,b,alpha or 1)
 end
 local function font(object,file,size)
-    if not object:SetFont(FONT..file..".ttf",math.max(8,size),"") then error("font_unavailable") end
+    addon.FontAPI.Apply(object,file,size)
     object:SetShadowColor(0,0,0,.9)
     object:SetShadowOffset(0,-1)
 end

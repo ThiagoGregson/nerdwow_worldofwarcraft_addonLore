@@ -80,20 +80,38 @@ try {
         throw "O destino NerdWow não é uma pasta: '$destination'."
     }
 
-    # O TOC é o manifesto canônico. Nesta entrega seus recursos são somente Lua.
+    # Lua no carregamento; fontes/licenças explicitamente declaradas no metadado.
     $tocPath = Join-Path $source 'NerdWow.toc'
     if (-not (Test-Path -LiteralPath $tocPath -PathType Leaf)) {
         throw "TOC não encontrado: '$tocPath'."
     }
     Assert-NoLink $tocPath
     $manifest = @{ 'NerdWow.toc' = $tocPath }
+    $entries = @()
+    $assetsDeclared = $false
     foreach ($line in [IO.File]::ReadAllLines($tocPath, [Text.Encoding]::UTF8)) {
+        if ($line -match '^##\s*X-NerdWow-Assets:\s*(.*)$') {
+            if ($assetsDeclared) { throw 'Metadado X-NerdWow-Assets duplicado.' }
+            $assetsDeclared = $true
+            foreach ($asset in $Matches[1].Split(',')) {
+                $entries += @{ Relative = $asset.Trim().Replace('/', '\'); Asset = $true }
+            }
+            continue
+        }
         $relative = $line.Trim().Replace('/', '\')
         if (-not $relative -or $relative.StartsWith('#')) { continue }
+        $entries += @{ Relative = $relative; Asset = $false }
+    }
+    $luaCount = 0
+    foreach ($entry in $entries) {
+        $relative = $entry.Relative
+        $validExtension = if ($entry.Asset) {
+            $relative -match '^Fonts\\[A-Za-z0-9][A-Za-z0-9._-]*\.(ttf|txt)$'
+        } else { [IO.Path]::GetExtension($relative) -ieq '.lua' }
         if ([IO.Path]::IsPathRooted($relative) -or $relative.Contains(':') -or
             $relative -match '(^|\\)\.{1,2}(\\|$)' -or
             $relative -match '(^|\\)(Tests|\.git)(\\|$)' -or
-            [IO.Path]::GetExtension($relative) -ine '.lua') {
+            -not $validExtension) {
             throw "Entrada de execução inválida no TOC: '$relative'."
         }
         $filePath = Get-AbsolutePath (Join-Path $source $relative)
@@ -106,8 +124,9 @@ try {
         }
         if ($manifest.ContainsKey($relative)) { throw "Entrada duplicada no TOC: '$relative'." }
         $manifest[$relative] = $filePath
+        if (-not $entry.Asset) { $luaCount++ }
     }
-    if ($manifest.Count -lt 2) { throw 'O TOC não lista arquivos de execução.' }
+    if ($luaCount -lt 1) { throw 'O TOC não lista arquivos de execução.' }
 
     $existing = @()
     if ($destinationItem) { $existing = @(Get-SafeTree $destination) }

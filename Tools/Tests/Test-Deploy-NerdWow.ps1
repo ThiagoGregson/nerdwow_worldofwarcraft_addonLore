@@ -44,13 +44,23 @@ try {
     New-Item -ItemType Directory -Path $source, $addOns -Force | Out-Null
     $realSource = Join-Path $projectRoot 'NerdWow'
     $toc = [IO.File]::ReadAllText((Join-Path $realSource 'NerdWow.toc'))
-    $runtimeCount = 1 + @($toc -split '\r?\n' | Where-Object { $_ -match '^[^#].*\.lua$' }).Count
+    $assets = @()
+    foreach ($line in $toc -split '\r?\n') {
+        if ($line -match '^##\s*X-NerdWow-Assets:\s*(.*)$') { $assets += @($Matches[1].Split(',') | ForEach-Object { $_.Trim() }) }
+    }
+    $runtimeCount = 1 + @($toc -split '\r?\n' | Where-Object { $_ -match '^[^#].*\.lua$' }).Count + $assets.Count
     Write-Fixture (Join-Path $source 'NerdWow.toc') $toc
     foreach ($line in $toc -split '\r?\n') {
         if ($line -match '^[^#].*\.lua$') {
             Write-Fixture (Join-Path $source $line) ([IO.File]::ReadAllText((Join-Path $realSource $line)))
         }
     }
+    foreach ($asset in $assets) {
+        $target = Join-Path $source $asset
+        New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $realSource $asset) -Destination $target
+    }
+    Write-Fixture (Join-Path $source 'Fonts\Unlisted.ttf') 'not a declared font'
     Write-Fixture (Join-Path $source 'Tests\Ignored.lua') 'not runtime'
     Write-Fixture (Join-Path $source '.git\config') 'not runtime'
     Write-Fixture (Join-Path $source 'Unlisted.lua') 'not runtime'
@@ -126,6 +136,39 @@ try {
     $passed++
 
     $stableDestination = Snapshot $destination
+    foreach ($asset in $assets) {
+        Assert ((Get-FileHash -LiteralPath (Join-Path $destination $asset)).Hash -eq
+            (Get-FileHash -LiteralPath (Join-Path $realSource $asset)).Hash) 'Fonte/licença difere da origem'
+        if ($asset.EndsWith('.ttf')) {
+            $bytes = [IO.File]::ReadAllBytes((Join-Path $destination $asset))
+            Assert ($bytes.Length -gt 1000 -and [BitConverter]::ToString($bytes,0,4) -eq '00-01-00-00') 'TTF estática inválida'
+        }
+    }
+    Assert (-not (Test-Path -LiteralPath (Join-Path $destination 'Fonts\Unlisted.ttf'))) 'Fonte não declarada copiada'
+    Assert ([IO.File]::ReadAllText((Join-Path $destination 'Fonts\OFL-Cinzel.txt')).Contains('SIL OPEN FONT LICENSE')) 'OFL Cinzel ausente'
+    Assert ([IO.File]::ReadAllText((Join-Path $destination 'Fonts\OFL-EBGaramond.txt')).Contains('SIL OPEN FONT LICENSE')) 'OFL EB Garamond ausente'
+    $passed++
+
+    # O manifesto governa também a remoção de fontes, sem espelhar Fonts inteira.
+    Write-Fixture (Join-Path $source 'NerdWow.toc') ($toc.Replace(', Fonts\Cinzel-Bold.ttf',''))
+    $assetPruned = & $deploy -SourcePath $source -AddOnsPath $addOns
+    Assert ($assetPruned.Removed.Count -eq 1 -and $assetPruned.Removed[0] -eq 'Fonts\Cinzel-Bold.ttf') 'Fonte fora do manifesto não removida'
+    Write-Fixture (Join-Path $source 'NerdWow.toc') $toc
+    & $deploy -SourcePath $source -AddOnsPath $addOns | Out-Null
+    Assert ((Snapshot $destination) -eq $stableDestination) 'Restauração do manifesto de fontes divergiu'
+    $passed++
+
+    $fontPath = Join-Path $source 'Fonts\Cinzel-Regular.ttf'
+    Remove-Item -LiteralPath $fontPath
+    Expect-Failure { & $deploy -SourcePath $source -AddOnsPath $addOns } 'Arquivo de execução não encontrado'
+    Copy-Item -LiteralPath (Join-Path $realSource 'Fonts\Cinzel-Regular.ttf') -Destination $fontPath
+    foreach ($bad in @('Fonts\..\outside.ttf','Fonts\Run.ps1','Other\Cinzel.ttf')) {
+        Write-Fixture (Join-Path $source 'NerdWow.toc') ($toc.Replace('Fonts\Cinzel-Regular.ttf',$bad))
+        Expect-Failure { & $deploy -SourcePath $source -AddOnsPath $addOns } 'Entrada de execução inválida'
+    }
+    Write-Fixture (Join-Path $source 'NerdWow.toc') ($toc + "`n## X-NerdWow-Assets: Fonts\Cinzel-Regular.ttf`n")
+    Expect-Failure { & $deploy -SourcePath $source -AddOnsPath $addOns } 'Metadado X-NerdWow-Assets duplicado'
+    Write-Fixture (Join-Path $source 'NerdWow.toc') $toc
     Expect-Failure { & $deploy -SourcePath (Join-Path $fixtureRoot 'missing\NerdWow') -AddOnsPath $addOns } 'Origem não encontrada'
     Expect-Failure { & $deploy -SourcePath $source -AddOnsPath (Join-Path $fixtureRoot 'missing\Interface\AddOns') } 'Interface\\AddOns não encontrada'
     Expect-Failure { & $deploy -SourcePath $destination -AddOnsPath $addOns } 'coincidir'

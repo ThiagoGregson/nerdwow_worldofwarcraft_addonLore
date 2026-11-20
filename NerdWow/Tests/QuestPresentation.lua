@@ -51,7 +51,10 @@ local function scene(moment,async)
     t.loadModule("Integration/Dialogue.lua",n,env)
     t.loadModule("Integration/QuestPresentation.lua",n,env)
     s.c=n.ConversationController.New({GetModel=function() return s.source end,IsEnabled=function() return not s.disabled end,
-        Prepare=function(model) return n.QuestPresentation.Build(model,n.QuestPlatform.ReadState(model),s.receipt) end,
+        Prepare=function(model)
+            if not model.quest then return n.Conversation.Build(model) end
+            return n.QuestPresentation.Build(model,n.QuestPlatform.ReadState(model),s.receipt)
+        end,
         View=n.ConversationView,Platform=p.api,Try=n.DiagnosticAPI.Try,
         Diagnose=function(fault,context) s.fault=fault; s.stage=context.stage end,
         Report=function() s.reports=s.reports+1 end})
@@ -134,7 +137,8 @@ test("clique e atalhos de recompensa habilitam concluir e chamam índice oficial
         equal(s.button("Concluir").enabled,true)
         local finish=s.button("Concluir"); finish.scripts.OnClick(finish); finish.scripts.OnClick(finish)
         equal(#s.calls,1); equal(s.calls[1].key,"GetQuestReward"); equal(s.calls[1].index,2)
-        equal(s.root().shown,false); equal(s.reports,0)
+        equal(s.root().shown,true); equal(s.p.env.QuestFrame.alpha,0); equal(s.reports,0)
+        s.c.Close(); equal(s.root().shown,false)
     end
 end)
 
@@ -201,7 +205,7 @@ test("conversa pendente de fonte entra em missão sem polling permanente e pode 
     s.r.fontBehavior=function(path)
         if path:find("NerdWow\\Fonts\\",1,true) and not s.r.loaded[path] then return {delay=.4} end
     end
-    s.c.Refresh(); equal(s.p.env.QuestFrame.alpha,.75)
+    s.c.Refresh(); equal(s.p.env.QuestFrame.alpha,0)
     s.r.drain(); equal(s.reports,0); equal(s.root().shown,true); equal(s.p.env.QuestFrame.alpha,0)
     s.disabled=true; s.c.Toggle(); equal(s.root().shown,false); equal(s.root().keyboard,false)
     s.r.drain(); equal(#s.r.timers,0); equal(s.p.env.QuestFrame.alpha,.75)
@@ -226,7 +230,7 @@ test("ações do pergaminho mantêm captura oficial e chosenReward sem duplicar 
     for _,event in ipairs(c.saved().events) do
         if event.type=="QUEST_COMPLETED" then count=count+1; equal(event.payload.chosenReward.itemID,502) end
     end
-    equal(count,1); equal(ui.visible,false)
+    c.flush(); equal(count,1); equal(ui.visible,false)
 end)
 
 test("diário bloqueado e evento não gravado não recebem nota de sucesso",function()
@@ -532,7 +536,7 @@ local function titleLines(name,title)
     return {{type=2,leftText=name},{type=0,leftText=title},{type=47,leftText="Nível 30"},{type=0,leftText="Ventobravo"}}
 end
 local function titleProbe(c)
-    for _,entry in ipairs(c.diagnostics().entries) do if entry.code=="npc_title_probe" then return entry end end
+    for _,entry in ipairs(c.diagnostics().entries) do if entry.code=="npc_title_unavailable" then return entry end end
 end
 test("título simples tolera tipos ausentes e separadores antes do nível sem adivinhar linha dois",function()
     for _,name in ipairs({"Estalajadeiro Fábio","Ferreiro Argus"}) do
@@ -541,7 +545,7 @@ test("título simples tolera tipos ausentes e separadores antes do nível sem ad
         c.unitTooltip={guid=c.npc.guid,lines={{type=1,leftText=""},{type=2,leftText=name},{leftText=title},
             {type=1,leftText=""},{type=47,leftText="Nível 30"}}}
         c.fire("GOSSIP_SHOW"); equal(c.namespace.GossipDialogs.GetCurrent().npc.title,title)
-        assert(titleProbe(c).message:find("accepted_plain",1,true))
+        equal(titleProbe(c),nil)
         c.fire("QUEST_DETAIL"); equal(c.namespace.QuestDialogs.GetCurrent().npc.title,title)
     end
 end)
@@ -562,8 +566,8 @@ test("tooltip de token resolvido só é usado quando GUID é idêntico ao NPC",f
         end
         c.fire("GOSSIP_SHOW"); equal(c.namespace.GossipDialogs.GetCurrent().npc.title,matches and "Treinamento de Ferraria" or nil)
         equal(calls,matches and 1 or 0)
-        local trace=titleProbe(c).message; assert(trace:find("data_unavailable",1,true))
-        assert(not trace:find(c.npc.guid,1,true))
+        if matches then equal(titleProbe(c),nil)
+        else equal(titleProbe(c).message,"data_unavailable"); assert(not titleProbe(c).message:find(c.npc.guid,1,true)) end
     end
 end)
 
@@ -580,20 +584,20 @@ test("tooltip nativo já aberto fornece título por GUID sem ser alterado",funct
     end
 end)
 
-test("diagnóstico do título preserva linhas brutas e motivo uma vez por NPC sem tocar diário",function()
+test("diagnóstico do título registra só falhas uma vez por NPC sem texto bruto nem diário",function()
     local c=t.client(); c.start(); c.npc.name="Ferreiro Argus"
-    c.unitTooltip={lines=titleLines(c.npc.name,"Treinamento de Ferraria")}
+    c.unitTooltip={lines={{type=2,leftText=c.npc.name},{type=0,leftText="não gravar esta linha"}}}
     c.fire("GOSSIP_SHOW"); local sequence=c.saved().nextSequence
     c.fire("GOSSIP_SHOW"); c.fire("GOSSIP_SHOW"); equal(c.saved().nextSequence,sequence)
     local count=0
-    for _,entry in ipairs(c.diagnostics().entries) do if entry.code=="npc_title_probe" then count=count+1; equal(entry.count,1) end end
+    for _,entry in ipairs(c.diagnostics().entries) do if entry.code=="npc_title_unavailable" then count=count+1; equal(entry.count,1) end end
     equal(count,1)
     local probe=titleProbe(c)
     equal(probe.context.stage,"npc_title"); equal(probe.context.creatureID,777)
-    assert(probe.message:find('2: type=0 left="Treinamento de Ferraria"',1,true))
-    assert(probe.message:find("decision=accepted_plain",1,true)); equal(probe.stack,nil)
+    equal(probe.message,"level_boundary_missing"); equal(probe.stack,nil)
+    assert(not probe.message:find("não gravar",1,true))
     c.npc.guid="Creature-0-1-0-0-778-000"; c.fire("GOSSIP_SHOW")
-    count=0; for _,entry in ipairs(c.diagnostics().entries) do if entry.code=="npc_title_probe" then count=count+1 end end
+    count=0; for _,entry in ipairs(c.diagnostics().entries) do if entry.code=="npc_title_unavailable" then count=count+1 end end
     equal(count,2)
 end)
 
@@ -616,27 +620,225 @@ test("título rejeita tipo identidade facção e secretos inclusive em dados ani
         elseif mode=="missing_header" then data.lines[1].leftText=nil end
         c.unitTooltip=data; c.fire("GOSSIP_SHOW")
         equal(c.namespace.GossipDialogs.GetCurrent().npc.title,nil)
-        local probe=titleProbe(c); assert(probe)
-        if mode~="faction" and mode~="level" and mode~="race" and mode~="missing_name" and mode~="missing_header" then
-            equal(probe.redacted,true)
-        end
-        assert(not probe.message:find("não gravar",1,true)); assert(probe.message:find("decision=",1,true))
+        local probe=titleProbe(c)
+        if mode=="level" then equal(probe,nil)
+        else assert(probe); assert(not probe.message:find("não gravar",1,true)); assert(#probe.message<40) end
     end
 end)
 
-test("coleta de título tem limite por sessão e dado extenso é truncado explicitamente",function()
+test("falhas de título têm limite por sessão e texto extenso nunca entra no diagnóstico",function()
     local c=t.client(); c.start(); c.npc.name="Ferreiro Argus"
     c.unitTooltip={lines=titleLines(c.npc.name,string.rep("História ",900))}
-    c.fire("GOSSIP_SHOW"); local probe=titleProbe(c)
-    equal(probe.messageTruncated,true); assert(#probe.message<=2048)
-    assert(probe.message:find("npc: accepted_plain",1,true))
+    c.fire("GOSSIP_SHOW"); equal(titleProbe(c),nil)
+    c.unitTooltip={lines={{type=2,leftText=c.npc.name}}}
+    c.namespace.DialogueAPI.ReadNPC(c.namespace.DialogueAPI.Reader())
+    equal(titleProbe(c).message,"level_boundary_missing")
     for index=1,140 do
         c.npc.guid="Creature-0-1-0-0-"..(2000+index).."-000"
-        c.unitTooltip={lines=titleLines(c.npc.name,"Treinamento de Ferraria")}
+        c.unitTooltip={lines={{type=2,leftText=c.npc.name},{type=0,leftText=string.rep("não gravar ",900)}}}
         c.namespace.DialogueAPI.ReadNPC(c.namespace.DialogueAPI.Reader())
     end
     local latest=c.diagnostics().entries[#c.diagnostics().entries]
     equal(latest.context.creatureID,2127); equal(#c.diagnostics().entries,50)
+end)
+
+test("evento oculta nativa antes do defer e troca conversa missão conversa sob fonte pendente",function()
+    local s=scene("OFFER",true); s.p.env.C_Timer.After=s.r.after
+    local quest=s.source
+    local gossip={moment="GOSSIP",text="Bem-vinda à vila.",npc=quest.npc,location=quest.location,
+        availableQuests={{index=1,questID=101,title=quest.quest.title}},options={}}
+    s.source=gossip; s.c.Handle("GOSSIP_SHOW")
+    equal(s.p.root.alpha,0); equal(s.p.env.QuestFrame.alpha,.75); equal(s.root().shown,true)
+    s.r.advance(0); s.root().scripts.OnUpdate(s.root(),1)
+    local top,bottom=s.r.regions[1],s.r.regions[2]; local topHeight=top.height
+    s.r.fontBehavior=function(path,size)
+        if path:find("Cinzel-Bold",1,true) and size==27 then return {delay=.45} end
+    end
+    local gossipStart=#s.p.root.alphaHistory+1
+    s.c.Choose(1); equal(s.p.root.alpha,0); equal(s.p.action,"SelectAvailableQuest")
+    s.source=nil; s.c.Handle("GOSSIP_CLOSED")
+    s.source=quest; s.c.Handle("QUEST_DETAIL")
+    equal(s.p.env.QuestFrame.alpha,0) -- before any rendering callback.
+    local questStart=#s.p.env.QuestFrame.alphaHistory
+    s.r.advance(0); equal(s.root().shown,true); equal(s.root().alpha,1)
+    equal(top.height,topHeight); assert(bottom.height>0); equal(s.c.Action("ACCEPT"),false)
+    s.p.root.alpha=.75; s.p.root.scripts.OnShow()
+    equal(s.p.root.alpha,0) -- synchronous suppression, child work remains deferred.
+    for _=1,12 do s.r.advance(.1) end
+    equal(s.reports,0); equal(s.p.env.QuestFrame.alpha,0); assert(s.button("Aceitar"))
+    equal(top.height,topHeight)
+    s.source=nil; s.c.Handle("QUEST_FINISHED")
+    s.source=gossip; s.c.Handle("GOSSIP_SHOW"); s.r.advance(0); s.r.advance(.2)
+    equal(s.root().shown,true); equal(s.p.root.alpha,0); equal(s.p.env.QuestFrame.alpha,0)
+    for index=gossipStart,#s.p.root.alphaHistory do equal(s.p.root.alphaHistory[index],0) end
+    for index=questStart,#s.p.env.QuestFrame.alphaHistory do equal(s.p.env.QuestFrame.alphaHistory[index],0) end
+    s.r.advance(2); equal(s.reports,0) -- obsolete deadlines cannot release the new moment.
+    s.c.Close(); equal(s.p.root.alpha,.75); equal(s.p.env.QuestFrame.alpha,.75)
+    equal(s.p.root.mouse,true); equal(s.p.child.keyboard,true); s.r.drain()
+end)
+
+test("progresso conclusão mantém barras e escolha até fechar sem restauração intermediária",function()
+    local s=scene("PROGRESS",true); s.p.env.C_Timer.After=s.r.after
+    s.completable=true; s.c.Handle("QUEST_PROGRESS"); equal(s.p.env.QuestFrame.alpha,0)
+    s.r.advance(0); s.root().scripts.OnUpdate(s.root(),1)
+    local height=s.r.regions[1].height; local start=#s.p.env.QuestFrame.alphaHistory+1
+    s.c.Action("CONTINUE"); equal(s.calls[1].key,"CompleteQuest")
+    equal(s.c.Action("CONTINUE"),false); equal(s.root().shown,true)
+    s.source=source("COMPLETE"); s.c.Handle("QUEST_COMPLETE"); equal(s.p.env.QuestFrame.alpha,0)
+    s.r.advance(0); equal(s.r.regions[1].height,height)
+    equal(s.button("Concluir").enabled,false); s.c.Key("2"); equal(s.button("Concluir").enabled,true)
+    for index=start,#s.p.env.QuestFrame.alphaHistory do equal(s.p.env.QuestFrame.alphaHistory[index],0) end
+    s.r.advance(3); equal(s.reports,0); equal(s.root().shown,true)
+    s.source=nil; s.c.Handle("QUEST_FINISHED"); s.r.advance(.1)
+    equal(s.root().shown,false); equal(s.p.env.QuestFrame.alpha,.75); s.r.drain()
+end)
+
+test("preparação tem prazo total de dois segundos mesmo com refresh repetido",function()
+    local s=scene("OFFER",true); s.p.env.C_Timer.After=s.r.after
+    s.r.fontBehavior=function(path)
+        if path:find("NerdWow\\Fonts\\",1,true) then return {delay=8} end
+    end
+    s.c.Handle("QUEST_DETAIL"); s.r.advance(0)
+    s.r.advance(.8); s.c.Handle("QUEST_ITEM_UPDATE"); s.r.advance(0)
+    s.r.advance(.8); s.c.Handle("QUEST_DETAIL"); s.r.advance(0)
+    equal(s.reports,0); equal(s.p.env.QuestFrame.alpha,0); equal(s.root().shown,true)
+    s.r.advance(.41); equal(s.reports,1); equal(s.stage,"preparation_timeout")
+    assert(s.fault.message:find("preparation_timeout",1,true)); assert(s.fault.stack)
+    equal(s.p.env.QuestFrame.alpha,.75); equal(s.root().shown,false); equal(s.root().keyboard,false)
+    s.r.drain(); equal(s.root().shown,false); equal(s.reports,1)
+end)
+
+test("espera de transição pode sair por Esc desligamento combate ou falha real",function()
+    for _,mode in ipairs({"escape","off","combat","error"}) do
+        local s=scene("OFFER",true); s.p.env.C_Timer.After=s.r.after
+        s.r.fontBehavior=function(path) if path:find("NerdWow\\Fonts\\",1,true) then return {delay=.8} end end
+        s.c.Handle("QUEST_DETAIL"); s.r.advance(0)
+        local old=s.root().scripts.OnKeyDown
+        if mode=="escape" then old(s.root(),"ESCAPE"); equal(s.p.action,"closeQuest")
+        elseif mode=="off" then s.disabled=true; s.c.Toggle()
+        elseif mode=="combat" then s.p.combat=true; s.c.Handle("PLAYER_REGEN_DISABLED")
+        else s.c.Fail("preparação indisponível","test") end
+        equal(s.root().shown,false); equal(s.root().keyboard,false); equal(s.p.env.QuestFrame.alpha,.75)
+        s.r.drain(); equal(s.root().shown,false); equal(s.reports,mode=="error" and 1 or 0)
+    end
+end)
+
+test("arquivo de fonte pronto não espera novamente por tamanho com SetFont false",function()
+    local s=scene("OFFER",true); local r=s.r; s.p.env.C_Timer.After=r.after
+    r.fontBehavior=function() return {delay=0,identityNow=true,factor=1} end
+    s.n.FontAPI.Preload(); r.advance(.1)
+    -- Each new profile still returns false, but identity and positive metrics
+    -- are already available for the same loaded files at every requested size.
+    s.c.Handle("QUEST_DETAIL"); r.advance(0)
+    equal(s.reports,0); assert(s.button("Aceitar")); equal(s.p.env.QuestFrame.alpha,0)
+    equal(s.root().shown,true); equal(r.now,.1)
+    local path,ready=s.n.FontAPI.Apply(r.parent:CreateFontString(nil,"OVERLAY","GameFontNormal"),"Cinzel-Bold",63)
+    equal(ready,true); assert(path:find("Cinzel-Bold",1,true))
+    s.c.Close(); r.drain()
+end)
+
+test("arquivo pronto não autoriza tamanho novo com identidade errada ou métrica zero",function()
+    for _,mode in ipairs({"identity","metric"}) do
+        local s=scene("OFFER",true); local r=s.r; s.p.env.C_Timer.After=r.after
+        s.n.FontAPI.Preload(); r.advance(.1)
+        r.fontBehavior=function(_,size)
+            if size==27 then return {delay=.5,identityNow=mode=="metric",factor=0} end
+        end
+        s.c.Handle("QUEST_DETAIL"); r.advance(0)
+        equal(s.p.env.QuestFrame.alpha,0); equal(s.button("Aceitar"),nil)
+        for _=1,17 do r.advance(.1) end
+        equal(s.reports,0); assert(s.button("Aceitar")); s.c.Close(); r.drain()
+    end
+end)
+
+test("tooltips reais da Erma Delegado e Remy usam nível localizado de tipo zero",function()
+    for _,npc in ipairs({{6749,"Erma","Mestre de Estábulo"},{240,"Delegado Durão"},{241,'Remy "Duas Vezes"'}}) do
+        local c=t.client(); c.start(); c.npc.name=npc[2]; c.npc.guid="Creature-0-1-0-0-"..npc[1].."-000"
+        local lines={{type=2,leftText=npc[2]}}
+        if npc[3] then lines[#lines+1]={type=0,leftText=npc[3]} end
+        for _,text in ipairs({"Nível 30","Ventobravo","JxJ"}) do lines[#lines+1]={type=0,leftText=text} end
+        c.unitTooltip={lines=lines}; c.fire("GOSSIP_SHOW")
+        equal(c.namespace.GossipDialogs.GetCurrent().npc.title,npc[3]); equal(titleProbe(c),nil)
+        c.fire("QUEST_DETAIL"); equal(c.namespace.QuestDialogs.GetCurrent().npc.title,npc[3]); equal(titleProbe(c),nil)
+    end
+end)
+
+test("limite de nível segue formato localizado cores e placeholders posicionais do cliente",function()
+    for _,sample in ipairs({{"Level %s","Level 30"},{"Stufe %d","Stufe 30"},{"Niveau %1$s","Niveau 30"},
+        {"[%s] Stufe","[30] Stufe"},{"Nivel %s %s","Nivel 30 Humanoide"}}) do
+        local c=t.client(); c.start(); c.npc.name="Erma"; c.env.TOOLTIP_UNIT_LEVEL=sample[1]
+        c.unitTooltip={lines={{type=2,leftText="Erma"},{type=0,leftText="|cffffffff<Mestre de Estábulo>|r"},
+            {type=0,leftText="|cffaaaaaa"..sample[2].."|r"},{type=0,leftText="Outra facção"},{type=0,leftText="PvP"}}}
+        c.fire("GOSSIP_SHOW"); equal(c.namespace.GossipDialogs.GetCurrent().npc.title,"Mestre de Estábulo")
+        equal(titleProbe(c),nil)
+    end
+end)
+
+test("sem padrão localizado seguro nem nível não inventa título por linha dois",function()
+    for _,template in ipairs({false,"%s","Incompatível %q","Level %s"}) do
+        local c=t.client(); c.start(); c.npc.name="Erma"; c.env.TOOLTIP_UNIT_LEVEL=template
+        c.unitTooltip={lines={{type=2,leftText="Erma"},{type=0,leftText="Mestre de Estábulo"},{type=0,leftText="Nível 30"}}}
+        c.fire("GOSSIP_SHOW"); equal(c.namespace.GossipDialogs.GetCurrent().npc.title,nil); assert(titleProbe(c))
+        c.unitTooltip.lines[3].type=47; c.fire("GOSSIP_SHOW")
+        equal(c.namespace.GossipDialogs.GetCurrent().npc.title,"Mestre de Estábulo") -- typed clients still work.
+    end
+end)
+
+test("título ignora linhas posteriores ao primeiro nível inclusive facção PvP e secretos",function()
+    local c=t.client(); c.start(); c.npc.name="Erma"
+    c.unitTooltip={lines={{type=2,leftText="Erma"},{type=0,leftText="Mestre de Estábulo"},
+        {type=0,leftText="Nível 30"},{type=0,leftText=c.secret},c.secret}}
+    c.fire("GOSSIP_SHOW"); equal(c.namespace.GossipDialogs.GetCurrent().npc.title,"Mestre de Estábulo")
+    equal(titleProbe(c),nil)
+    c.unitTooltip.lines[2]={type=0,leftText="Nível 30"}; c.unitTooltip.lines[3]={type=0,leftText="Hospedagem"}
+    c.fire("GOSSIP_SHOW"); equal(c.namespace.GossipDialogs.GetCurrent().npc.title,nil); equal(titleProbe(c),nil)
+end)
+
+test("capitulares M W e acentuadas reservam largura medida sem sobrepor corpo em todas escalas",function()
+    for _,letter in ipairs({"M","W","Á","É","Ç","Ü"}) do
+        for _,size in ipairs({{1280,720},{3440/.8,1440/.8},{5120/1.25,1440/1.25}}) do
+            local s=scene("OFFER"); s.r.parent:SetSize(size[1],size[2])
+            s.r.glyphWidths={[letter]=1.35}
+            s.source.quest.description=letter.."ísthica, você chegou para ouvir esta história."
+            s.c.Refresh(); equal(s.reports,0)
+            local cap,body
+            for _,region in ipairs(s.r.regions) do
+                if region.shown and region.alpha~=0 then
+                    if region.text==letter then cap=region end
+                    if region.text=="ísthica, você chegou para ouvir esta história." then body=region end
+                end
+            end
+            assert(cap); equal(cap.wrap,false); equal(cap.nonSpaceWrap,false)
+            assert(cap.width>=cap:GetUnboundedStringWidth()); assert(cap.height>=cap:GetStringHeight())
+            assert(body)
+            assert(body.points[1][4]>=cap.points[1][4]+cap.width+7*(size[2]/720)-.01)
+            s.c.Close()
+        end
+    end
+end)
+
+test("capitular insegura deixa primeiro parágrafo integral sem perda nem reticência",function()
+    for _,mode in ipairs({"wide","zero","error","combining","markup","symbol","malformed"}) do
+        local s=scene("OFFER"); local text="Místhica, você chegou."
+        if mode=="combining" then text="A\204\129urea memória."
+        elseif mode=="markup" then text="|cffffffffMísthica|r, você chegou."
+        elseif mode=="symbol" then text="“Místhica, você chegou.”"
+        elseif mode=="malformed" then text="\196A memória."
+        else s.r.glyphWidths={M=mode=="wide" and 9 or 0} end
+        if mode=="error" then
+            -- All descendants use the renderer's regions; wrap only the cap meter.
+            local apply=s.n.FontAPI.Apply
+            s.n.FontAPI.Apply=function(object,name,size)
+                local a,b=apply(object,name,size)
+                if name=="Cinzel-Bold" and size==48 then object.GetUnboundedStringWidth=function() error("cap metric unavailable") end end
+                return a,b
+            end
+        end
+        s.source.quest.description=text; s.c.Refresh(); equal(s.reports,0)
+        local paragraph=s.text(text); assert(paragraph and paragraph.shown)
+        equal(paragraph.points[1][4],0); equal(paragraph.wrap,true); equal(paragraph.nonSpaceWrap,true)
+        s.c.Close()
+    end
 end)
 
 return {scene=scene,source=source,conversationScene=conversationScene}

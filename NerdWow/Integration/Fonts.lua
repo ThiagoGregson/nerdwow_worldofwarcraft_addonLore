@@ -10,6 +10,7 @@ local files = {
     {name="EBGaramond-Regular",fallback=BODY}, {name="EBGaramond-Italic",fallback=BODY},
 }
 local embedded, reported, profiles, order = {},{},{},{}
+local readyFiles={}
 local applications = setmetatable({}, {__mode="k"})
 local preloaded, frame, changed, probes, testGeneration = false,nil,nil,{},0
 for _, file in ipairs(files) do file.path=BASE..file.name..".ttf"; embedded[file.name]=file end
@@ -68,7 +69,7 @@ local function invisible()
     return object
 end
 -- Fixed sample probes observe metric changes independently of the typewriter text.
-local function request(object,path,size,flags,metrics,onChange,onDone)
+local function request(object,path,size,flags,metrics,onChange,onDone,trusted)
     local after=type(C_Timer)=="table" and type(C_Timer.After)=="function" and C_Timer.After
     local job={object=object,path=path,size=size,flags=flags,metrics=metrics,ticks=0,stable=0}
     job.success,job.fault=setFont(object,path,size,flags)
@@ -76,7 +77,7 @@ local function request(object,path,size,flags,metrics,onChange,onDone)
     local function valid(value)
         return value.applied and (not metrics or (positive(value.width) and positive(value.height)))
     end
-    job.ready=job.success and valid(job.value)
+    job.ready=(job.success or trusted) and valid(job.value)
     local function check()
         if job.cancelled then return end
         job.ticks=job.ticks+1
@@ -121,7 +122,10 @@ end
 local function profile(file,size)
     local key=file.name..":"..string.format("%.9g",size)
     local job=profiles[key]
-    if job then return job end
+    if job then
+        if job.ready and job.value.applied then readyFiles[file.path]=true end
+        return job
+    end
     local object
     if #order>=MAX_PROFILES then
         for index,oldKey in ipairs(order) do
@@ -134,9 +138,14 @@ local function profile(file,size)
     end
     object=object or invisible()
     object:SetText(SAMPLE)
-    job=request(object,file.path,size,nil,true,notify,function(value)
+    job=request(object,file.path,size,nil,true,function(value)
+        if value.ready and value.value.applied then readyFiles[file.path]=true end
+        notify()
+    end,function(value)
+        if value.ready and value.value.applied then readyFiles[file.path]=true end
         if not value.ready then fallback(value,file); notify() end
-    end)
+    end,readyFiles[file.path])
+    if job.ready and job.value.applied then readyFiles[file.path]=true end
     profiles[key]=job; order[#order+1]=key
     return job
 end

@@ -22,7 +22,11 @@ local function controller(n)
     function view.IsTyping() if state.failTyping then error("typing failure") end; return state.typing end
     local platform={}
     function platform.CanPresent() return state.canPresent end
-    function platform.Defer(callback) state.queued[#state.queued+1]=callback; return not state.noDefer end
+    state.deadlines={}
+    function platform.Defer(callback,delay)
+        local queue=delay==2 and state.deadlines or state.queued
+        queue[#queue+1]=callback; return not state.noDefer
+    end
     function platform.RestoreNative() state.native=false; if state.failRestore then error("restore failure") end end
     function platform.TakeNative(moment)
         state.native=true; state.nativeMoment=moment
@@ -43,7 +47,7 @@ local function controller(n)
     return state
 end
 local function nativeFrame(children)
-    local f={alpha=.75,mouse=true,keyboard=false,children=children or {},scripts={}}
+    local f={alpha=.75,alphaHistory={.75},mouse=true,keyboard=false,children=children or {},scripts={}}
     local function writable()
         f.setterCalls=(f.setterCalls or 0)+1
         assert(not f.protected and not f.forbidden and not f.stateLocked,"setter nativo restrito")
@@ -52,7 +56,7 @@ local function nativeFrame(children)
     function f:IsForbidden() return self.forbidden or false end
     function f:CanChangeProtectedState() return not self.protected and not self.forbidden and not self.stateLocked end
     function f:GetAlpha() return self.alpha end
-    function f:SetAlpha(value) writable(); self.alpha=value end
+    function f:SetAlpha(value) writable(); self.alpha=value; self.alphaHistory[#self.alphaHistory+1]=value end
     function f:IsMouseEnabled() return self.mouse end
     function f:EnableMouse(value) writable(); if self.failDisable and not value then error("mouse failure") end; self.mouse=value end
     function f:IsKeyboardEnabled() return self.keyboard end
@@ -66,8 +70,11 @@ local function platform(n)
     local child=nativeFrame(); child.keyboard=true
     local sibling=nativeFrame(); sibling.mouse=false
     local root=nativeFrame({child,sibling})
-    local env={type=type,ipairs=ipairs,pcall=pcall,error=error,
-        UIParent={},GossipFrame=root,QuestFrame=nativeFrame(),C_Timer={After=function(_,callback) callback() end},
+    state.deadlines={}
+    local env={type=type,ipairs=ipairs,pairs=pairs,pcall=pcall,error=error,
+        UIParent={},GossipFrame=root,QuestFrame=nativeFrame(),C_Timer={After=function(delay,callback)
+            if delay>0 then state.deadlines[#state.deadlines+1]=callback else callback() end
+        end},
         issecretvalue=function(value) return value==state.secret end,
         InCombatLockdown=function() return state.combat end,
         GetCurrentKeyBoardFocus=function() return state.focus end,
@@ -324,7 +331,7 @@ test("composição consome modelo capturado e seleção permanece no observador 
     equal(ui.view.text,c.namespace.GossipDialogs.GetCurrent().text)
     ui.callbacks.Choose(3)
     equal(c.saved().events[#c.saved().events].type,"GOSSIP_OPTION_SELECTED")
-    c.fire("QUEST_DETAIL"); equal(ui.visible,false); equal(ui.native,false)
+    c.fire("QUEST_DETAIL"); equal(ui.visible,false); equal(ui.native,true)
     equal(c.saved().events[#c.saved().events].type,"QUEST_OFFERED")
 end)
 
@@ -477,6 +484,9 @@ local function renderer(n,asynchronous)
             return true
         end
         local function naturalWidth(text)
+            if state.glyphWidths and state.glyphWidths[text] and f.font and f.font:find("Cinzel-Bold",1,true) then
+                return state.glyphWidths[text]*(f.size or 16)
+            end
             local _,characters=(text or ""):gsub("[^\128-\191]","")
             local ratio=f.font and f.font:find("Cinzel",1,true) and .58 or .45
             return characters*(f.size or 16)*ratio*(f.metricFactor or 1)
@@ -561,15 +571,15 @@ test("pré carregamento invisível aplica quatro fontes antes da conversa e term
     equal(view.Show(assert(n.Conversation.Build(model()))),true)
 end)
 
-test("conversa espera aplicação tardia sem suprimir Blizzard nem medir com fonte anterior",function()
+test("conversa espera aplicação tardia com barras e Blizzard oculta sem medir fonte anterior",function()
     local n=core(); local r=renderer(n,true); local p=platform(n); local reports=0
     delayed(r,.6,false); n.FontAPI.Preload()
     local source=model(); source.npc.name="Major Belmonte"; source.npc.title=""
     source.location={zone="Vila Norte",subZone="Vale de Vila Norte"}
     local c=n.ConversationController.New({GetModel=function() return source end,IsEnabled=function() return true end,
         View=n.ConversationView,Platform=p.api,Report=function() reports=reports+1 end})
-    c.Refresh(); equal(dialogRoot(r).shown,false); equal(p.root.alpha,.75)
-    equal(dialogRoot(r).keyboard,false)
+    c.Refresh(); equal(dialogRoot(r).shown,true); equal(p.root.alpha,0)
+    equal(dialogRoot(r).keyboard,true)
     r.drain(); equal(reports,0); equal(dialogRoot(r).shown,true); equal(p.root.alpha,0)
     for _,read in ipairs(r.metricReads) do
         if read.text==source.npc.name or read.text==source.location.zone or read.text==source.location.subZone then
@@ -629,7 +639,7 @@ test("GetFont correto com métricas zero aguarda a métrica final sem fallback n
     local c=n.ConversationController.New({GetModel=model,IsEnabled=function() return true end,
         View=n.ConversationView,Platform=p.api,Report=function() reports=reports+1 end})
     c.Refresh(); r.advance(.4)
-    equal(p.root.alpha,.75); equal(dialogRoot(r).shown,false)
+    equal(p.root.alpha,0); equal(dialogRoot(r).shown,true)
     r.drain(); equal(reports,0); equal(p.root.alpha,0)
     for _,call in ipairs(r.fontCalls) do assert(call.path:find("NerdWow\\Fonts\\",1,true)) end
     c.Close()
@@ -670,7 +680,7 @@ test("fechar ou trocar conversa invalida notificação de fonte pendente",functi
         local source=model()
         local c=n.ConversationController.New({GetModel=function() return source end,IsEnabled=function() return true end,
             View=n.ConversationView,Platform=p.api,Report=function() reports=reports+1 end})
-        c.Refresh(); equal(dialogRoot(r).shown,false)
+        c.Refresh(); equal(dialogRoot(r).shown,true)
         if action=="replace" then source=nil; c.Refresh() else c.Handle("GOSSIP_CLOSED") end
         r.drain(); equal(dialogRoot(r).shown,false); equal(dialogRoot(r).keyboard,false)
         equal(p.root.alpha,.75); equal(reports,0)
@@ -700,7 +710,7 @@ test("fallback adiado conclui o cinema sem ciclo de retry e nova conversa recupe
     n.DiagnosticAPI.Bind(function(value) records[#records+1]=value end)
     local c=n.ConversationController.New({GetModel=model,IsEnabled=function() return true end,
         View=n.ConversationView,Platform=p.api,Report=function() reports=reports+1 end})
-    c.Refresh(); equal(p.root.alpha,.75)
+    c.Refresh(); equal(p.root.alpha,0)
     for _=1,55 do r.advance(.1) end
     equal(reports,0); equal(dialogRoot(r).shown,true); equal(p.root.alpha,0); equal(#records,4)
     for _,region in ipairs(r.regions) do
@@ -800,9 +810,9 @@ test("frame oculto com retângulo zero apresenta usando viewport válido",functi
     view.Hide(); equal(frame:GetWidth(),0); equal(frame.keyboard,false)
 end)
 
-test("viewport indisponível adia três vezes sem tomar controle e registra limite",function()
+test("viewport indisponível oculta nativa durante três tentativas e registra limite",function()
     local n=core(); local p=platform(n); local r=renderer(n); local queued,failures={},{}
-    p.api.Defer=function(callback) queued[#queued+1]=callback; return true end
+    p.api.Defer=function(callback,delay) if delay~=2 then queued[#queued+1]=callback end; return true end
     r.parent:SetSize(0,0)
     local c=n.ConversationController.New({GetModel=model,IsEnabled=function() return true end,
         View=n.ConversationView,Platform=p.api,Try=n.DiagnosticAPI.Try,
@@ -813,7 +823,7 @@ test("viewport indisponível adia três vezes sem tomar controle e registra limi
     while #queued>0 do
         local current=queued; queued={}
         for _, callback in ipairs(current) do callback(); attempts=attempts+1; assert(attempts<=4) end
-        equal(p.root.alpha,.75)
+        equal(p.root.alpha,#failures==0 and 0 or .75)
     end
     equal(attempts,4); equal(#failures,1)
     local failure=failures[1]
@@ -830,11 +840,11 @@ end)
 
 test("viewport resolvido na próxima tentativa retoma sem falha ou chat",function()
     local n=core(); local p=platform(n); local r=renderer(n); local queued={}; local reports=0
-    p.api.Defer=function(callback) queued[#queued+1]=callback; return true end
+    p.api.Defer=function(callback,delay) if delay~=2 then queued[#queued+1]=callback end; return true end
     r.parent:SetSize(0,0)
     local c=n.ConversationController.New({GetModel=model,IsEnabled=function() return true end,
         View=n.ConversationView,Platform=p.api,Try=n.DiagnosticAPI.Try,Report=function() reports=reports+1 end})
-    c.Refresh(); equal(#queued,1); equal(p.root.alpha,.75)
+    c.Refresh(); equal(#queued,1); equal(p.root.alpha,0)
     r.parent:SetSize(1280,720); queued[1]()
     equal(reports,0); equal(p.root.alpha,0); equal(r.frames[1].keyboard,true)
 end)
@@ -854,7 +864,7 @@ test("fallback síncrono dentro de Show impede retomada de teclado e supressão 
             end}
     end
     s.ctrl.Refresh()
-    equal(diagnosed,1); equal(took,0); equal(s.reports,1)
+    equal(diagnosed,1); equal(took,1); equal(s.reports,1)
     equal(s.keyboard,false); equal(s.visible,false)
 end)
 
@@ -1306,5 +1316,20 @@ test("redimensionar e ocultar o pai preservam modelo e retomam apenas animação
     equal(r.regions[1].height,1080*.09); equal(reports,0)
     frame:Hide(); frame:Show(); equal(frame.scripts.OnUpdate,nil)
     c.Close(); equal(frame.keyboard,false)
+end)
+test("supressão idempotente agrega filhos tardios e restaura baselines das duas raízes",function()
+    local p=platform(core()); local notifications=0
+    p.api.TakeNative("GOSSIP",function() notifications=notifications+1 end)
+    local late=nativeFrame(); late.keyboard=true; p.root.children[#p.root.children+1]=late
+    p.root.mouse=true; p.sibling.mouse=true -- native refresh changed existing children.
+    p.api.TakeNative("OFFER",function() notifications=notifications+1 end)
+    p.api.TakeNative("GOSSIP",function() notifications=notifications+1 end)
+    equal(late.mouse,false); equal(late.keyboard,false); equal(p.sibling.mouse,false)
+    equal(p.root.alpha,0); equal(p.env.QuestFrame.alpha,0)
+    p.root.scripts.OnShow(); p.env.QuestFrame.scripts.OnShow(); equal(notifications,2)
+    for index=2,#p.root.alphaHistory do equal(p.root.alphaHistory[index],0) end
+    p.api.RestoreNative(); equal(p.root.alpha,.75); equal(p.env.QuestFrame.alpha,.75)
+    equal(p.root.mouse,true); equal(p.sibling.mouse,false); equal(late.mouse,true); equal(late.keyboard,true)
+    p.root.scripts.OnShow(); equal(notifications,2)
 end)
 return {renderer=renderer,platform=platform,wire=wire}

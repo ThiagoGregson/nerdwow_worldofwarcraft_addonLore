@@ -2,7 +2,7 @@
 ## Title: NerdWow
 ## Notes: Diário de eventos do personagem para o Nerd-Wow.
 ## Author: Greg
-## Version: 0.7.1
+## Version: 0.7.2
 ## SavedVariables: NerdWow_Journal, NerdWow_Settings, NerdWow_Diagnostics
 ## AddonCompartmentFunc: NerdWow_OnAddonCompartmentClick
 ## X-NerdWow-Assets: Fonts\Cinzel-Regular.ttf, Fonts\Cinzel-Bold.ttf, Fonts\EBGaramond-Regular.ttf, Fonts\EBGaramond-Italic.ttf, Fonts\OFL-Cinzel.txt, Fonts\OFL-EBGaramond.txt, Fonts\SOURCES.txt

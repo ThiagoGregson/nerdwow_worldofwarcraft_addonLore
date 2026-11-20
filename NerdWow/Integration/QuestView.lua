@@ -118,6 +118,7 @@ function View.New(parent,options)
         labelIndex=labelIndex+1
         local object=labels[labelIndex]
         if not object then object=makeLabel(child); labels[labelIndex]=object end
+        object:SetWordWrap(true); object:SetNonSpaceWrap(true)
         object:ClearAllPoints(); object:SetPoint("TOPLEFT",child,"TOPLEFT",x,-y)
         font(object,file,size,hex,alpha); object:SetSpacing(3*layout.scale)
         local height=options.Height(object,value,file,size,width)
@@ -309,8 +310,22 @@ function View.New(parent,options)
         for index,part in ipairs(addon.Conversation.Paragraphs(model.paper.text)) do
             local drop,rest=nil,part.text
             if index==1 then drop,rest=addon.QuestPresentation.Drop(part.text) end
-            if drop then
-                local inset=48*s
+            local dropWidth=drop and options.Width(drop,"Cinzel-Bold",48*s,true)
+            local capWidth=type(dropWidth)=="number" and dropWidth>0 and dropWidth<math.huge
+                and math.max(41*s,math.ceil(dropWidth+4*s)) or nil
+            local inset=capWidth and capWidth+7*s
+            if inset and (inset>width*.35 or width-inset<170*s) then inset=nil end
+            if inset then
+                local before=labelIndex
+                local _,dropObject=text(drop,"Cinzel-Bold",48*s,0,y,capWidth,sealHex)
+                dropObject:SetWordWrap(false); dropObject:SetNonSpaceWrap(false)
+                local ok,actual=pcall(dropObject.GetUnboundedStringWidth,dropObject)
+                if not ok or issecretvalue and issecretvalue(actual)
+                    or type(actual)~="number" or actual~=actual or actual<=0 or actual>capWidth then
+                    dropObject:Hide(); labelIndex=before; inset=nil
+                end
+            end
+            if inset then
                 local position,lineStart,lines,split=1,1,1,#rest
                 while position<=#rest do
                     local _,finish=rest:find("%S+%s*",position)
@@ -321,10 +336,11 @@ function View.New(parent,options)
                     end
                     position=finish+1
                 end
-                local _,dropObject=text(drop,"Cinzel-Bold",48*s,0,y,inset-7*s,sealHex)
+                local dropObject=labels[labelIndex]
                 local headHeight=text(rest:sub(1,split),"EBGaramond-Regular",17*s,inset,y,width-inset)
-                dropObject:SetHeight(math.max(52*s,headHeight))
-                y=y+math.max(52*s,headHeight)
+                local capHeight=math.max(52*s,dropObject:GetStringHeight()+2*s,headHeight)
+                dropObject:SetHeight(capHeight)
+                y=y+capHeight
                 if split<#rest then y=y+text(rest:sub(split+1),"EBGaramond-Regular",17*s,0,y,width) end
             else y=y+text(part.text,"EBGaramond-Regular",17*s,0,y,width) end
             y=y+13*s

@@ -3,7 +3,7 @@ local sources, toc, previewFonts = ...
 assert(_VERSION == "Lua 5.1", "Os testes exigem runtime compatível com Lua 5.1")
 local passed = 0
 local function test(name, callback)
-    local ok, failure = pcall(callback)
+    local ok, failure = xpcall(callback,debug.traceback)
     assert(ok, name .. ": " .. tostring(failure))
     passed = passed + 1
 end
@@ -375,9 +375,16 @@ local function client(saved, settings, absentSettings)
     end
     env.UnitExists = function(unit) equal(unit, "npc"); return state.npc ~= nil end
     env.C_TooltipInfo = { GetUnit = function(unit)
-        equal(unit, "npc"); return state.unitTooltip or { lines = {
-            {leftText=state.npc and state.npc.name,type=2}, { leftText = state.npc and state.npc.subtitle,type=state.subtitleType or 0 } } }
+        equal(unit, "npc")
+        if state.unitTooltip then return state.unitTooltip end
+        local lines={{leftText=state.npc and state.npc.name,type=2}}
+        if state.npc and state.npc.subtitle~=nil then
+            lines[#lines+1]={leftText=state.npc.subtitle,type=state.subtitleType or 0}
+        end
+        lines[#lines+1]={leftText="Nível 30",type=0}
+        return {lines=lines}
     end }
+    env.TOOLTIP_UNIT_LEVEL="Nível %s"
     env.GetQuestID = function() return state.quest.id end
     env.QuestGetAutoAccept=function() return state.autoAccept==true end
     env.IsQuestCompletable=function() return state.completable==true end
@@ -417,7 +424,9 @@ local function client(saved, settings, absentSettings)
         if state.rewardHook then state.rewardHook(index) end
     end
     env.C_Timer = { After = function(delay, callback)
-        assert(delay==0 or delay==.1); state.timers[#state.timers + 1] = callback
+        assert(delay==0 or delay==.1 or delay==2)
+        if delay==2 then return end
+        state.timers[#state.timers + 1] = callback
     end }
     env.C_GossipInfo = {
         GetText = function() return state.gossip.text end,
@@ -612,7 +621,7 @@ test("metadados e carregamento real do TOC", function()
     equal(metadata.Interface, "120105")
     equal(metadata.Title, "NerdWow")
     equal(metadata.Author, "Greg")
-    equal(metadata.Version, "0.7.1")
+    equal(metadata.Version, "0.7.2")
     equal(metadata.SavedVariables, "NerdWow_Journal, NerdWow_Settings, NerdWow_Diagnostics")
     equal(#order, 29)
     for _, path in ipairs(order) do assert(not path:find("Tests/", 1, true)) end
@@ -649,7 +658,7 @@ test("entrada, status pt-BR e ajuda", function()
     equal(events[2].type, "LOCATION_CHANGED")
     equal(events[2].timestamp, TIME)
     c.command()
-    assert(c.messages[1]:find("v0.7.1 | esquema 1 | 2 eventos", 1, true))
+    assert(c.messages[1]:find("v0.7.2 | esquema 1 | 2 eventos", 1, true))
     assert(c.messages[1]:find("mudança de local", 1, true))
     assert(c.messages[1]:find("UTC", 1, true))
     assert(c.messages[2]:find("/reload", 1, true))
@@ -1167,7 +1176,7 @@ test("dica mostra versão, totais, pendentes, UTC e instruções em pt-BR", func
     local c = client()
     c.start()
     local text = tooltipText(c)
-    for _, expected in ipairs({ "NerdWow v0.7.1", "Eventos no diário: 2",
+    for _, expected in ipairs({ "NerdWow v0.7.2", "Eventos no diário: 2",
         "Novos desta sessão aguardando gravação: 2", "Último evento:", "UTC",
         "Clique esquerdo: sincronizar", "Arraste com o botão esquerdo" }) do
         assert(text:find(expected, 1, true), expected)

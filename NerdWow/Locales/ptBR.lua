@@ -84,7 +84,8 @@ addon.Text = {
         GOSSIP_OPTION_SELECTED = "opção de conversa escolhida",
     },
     errors = {
-        npc_title_probe = "coleta do título do NPC",
+        preparation_timeout = "tempo de preparação da interface esgotado",
+        npc_title_unavailable = "título do NPC indisponível",
         quest_state_unavailable = "estado da missão indisponível ou alterado",
         quest_native_required = "esta missão requer confirmação da Blizzard",
         invalid_root = "raiz do diário ausente ou inválida",

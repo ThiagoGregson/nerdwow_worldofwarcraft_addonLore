@@ -14,6 +14,7 @@ local measures={}
 local measureOrder={}
 local questPaper
 local refreshPending=false
+local transitioning=false
 local function rgb(hex)
     return tonumber(hex:sub(1,2),16)/255,tonumber(hex:sub(3,4),16)/255,tonumber(hex:sub(5,6),16)/255
 end
@@ -76,7 +77,7 @@ local function button(index)
     return b
 end
 -- A medição tem uma região própria mostrada (alpha zero), nunca Hide().
-local function textWidth(text,file,size)
+local function textWidth(text,file,size,requireMetric)
     -- Never reuse a pending FontString for another font/size.
     local key=file..":"..string.format("%.9g",size)
     local meter=measures[key]
@@ -91,8 +92,14 @@ local function textWidth(text,file,size)
     end
     font(meter,file,size)
     meter:SetText(text)
-    local width=meter:GetUnboundedStringWidth()
+    local width
+    if requireMetric then
+        local ok,value=pcall(meter.GetUnboundedStringWidth,meter)
+        if not ok or issecretvalue and issecretvalue(value) then return nil end
+        width=value
+    else width=meter:GetUnboundedStringWidth() end
     if type(width)=="number" and width>0 and width<math.huge then return width end
+    if requireMetric then return nil end
     local _,characters=text:gsub("[^\128-\191]","")
     return characters*size*.55
 end
@@ -344,7 +351,7 @@ function View.New(newCallbacks)
     exit:SetScript("OnLeave",safe(function() if model then color(exit.label,model.theme.muted) end end))
     root:SetScript("OnKeyDown",safe(function(_,key)
         root:SetPropagateKeyboardInput(true)
-        if shown and addon.ConversationPlatform.KeyAllowed() and callbacks.Key(key) then root:SetPropagateKeyboardInput(false) end
+        if (shown or transitioning) and addon.ConversationPlatform.KeyAllowed() and callbacks.Key(key) then root:SetPropagateKeyboardInput(false) end
     end))
     root:SetScript("OnKeyUp",safe(function() root:SetPropagateKeyboardInput(true) end))
     root:SetScript("OnSizeChanged",safe(function()
@@ -363,10 +370,36 @@ function View.New(newCallbacks)
     end,"OnShow"))
     root:SetScript("OnHide",safe(function() root:SetScript("OnUpdate",nil); root:EnableKeyboard(false) end,"OnHide"))
     handle={}
+    function handle.Transition()
+        shown=false; waiting=false; refreshPending=false; transitioning=true
+        root:SetScript("OnUpdate",nil)
+        if questPaper then questPaper.Hide() end
+        scroll:Hide(); optionScroll:Hide()
+        for _,object in ipairs({name,title,zone,subzone,hint,crest,crestShadow,more,optionsMore,exit}) do object:SetAlpha(0) end
+        local viewport=dimensions()
+        local initial=addon.Conversation.Layout(viewport.viewportWidth,viewport.viewportHeight)
+        if not initial then root:Hide(); return end
+        layout=layout or initial
+        if bottomHeight<=0 then bottomHeight=initial.bottom end
+        local r,g,b=rgb(model and model.theme.night or "07060a")
+        top:SetColorTexture(r,g,b,1); bottom:SetColorTexture(r,g,b,1)
+        local function bars(_,delta)
+            entrance=math.min(.9,entrance+(delta or 0))
+            local eased=1-(1-entrance/.9)^3
+            top:SetHeight(math.max(.01,layout.top*eased)); bottom:SetHeight(math.max(.01,bottomHeight*eased))
+            if entrance==.9 then root:SetScript("OnUpdate",nil) end
+        end
+        bars(nil,0)
+        root:SetAlpha(1); root:Show(); root:EnableKeyboard(true); root:SetPropagateKeyboardInput(true)
+        if entrance<.9 then root:SetScript("OnUpdate",safe(bars,"transition")) end
+    end
     function handle.Show(input,retryFonts)
+        local retained=transitioning
+        transitioning=false
         faulted=false; preparing=false; waiting=false; refreshPending=false
         if retryFonts~=false then addon.FontAPI.Retry() end
-        model=input; speech=assert(addon.Conversation.NewSpeech(input.text)); entrance=0
+        model=input; speech=assert(addon.Conversation.NewSpeech(input.text))
+        if not retained then entrance=0 end
         if input.kind=="quest" then
             if not questPaper then
                 questPaper=addon.QuestView.New(root,{Font=font,Width=textWidth,Height=textHeight,Safe=safe,
@@ -377,7 +410,7 @@ function View.New(newCallbacks)
         local viewport=dimensions()
         local initial=addon.Conversation.Layout(viewport.viewportWidth,viewport.viewportHeight)
         if not initial then
-            shown=false; root:Hide(); return false,"layout_pending",viewport
+            handle.Transition(); return false,"layout_pending",viewport
         end
         local s=initial.scale
         if input.kind=="quest" then questPaper.Prepare(s) end
@@ -389,25 +422,27 @@ function View.New(newCallbacks)
             {"EBGaramond-Regular",initial.optionSize},{"Cinzel-Regular",initial.optionSize*.78},
             {"Cinzel-Bold",18*s}}) do addon.FontAPI.Prepare(request[1],request[2]) end
         shown=true; preparing=true
-        root:SetAlpha(0); root:Show(); preparing=false
+        root:SetAlpha(0); root:Show(); scroll:Show(); optionScroll:Show(); preparing=false
         if faulted or not shown then return false,"view_failed",dimensions() end
         local ready,code=arrange()
         if not ready then
+            handle.Transition()
             waiting=code=="font_pending"
-            shown=false; root:Hide()
             return false,code or "layout_pending",dimensions()
         end
         scroll:SetVerticalScroll(0)
         optionScroll:SetVerticalScroll(0); scrollHint()
-        top:SetHeight(.01); bottom:SetHeight(.01)
-        for _, object in ipairs({name,title,zone,subzone,hint,crest,crestShadow,scroll,optionScroll,more,optionsMore,exit}) do object:SetAlpha(0) end
+        if not retained then top:SetHeight(.01); bottom:SetHeight(.01) end
+        local alpha=1-(1-math.min(1,entrance/.9))^3
+        for _, object in ipairs({name,title,zone,subzone,hint,crest,crestShadow,scroll,optionScroll,more,optionsMore,exit}) do object:SetAlpha(alpha) end
         if faulted or not shown then return false,"view_failed",dimensions() end
         root:EnableKeyboard(true); root:SetPropagateKeyboardInput(true); root:SetAlpha(1)
         root:SetScript("OnUpdate",safe(update,"OnUpdate"))
         return true,nil,dimensions()
     end
     function handle.Hide()
-        shown=false; preparing=false; waiting=false; refreshPending=false; root:SetScript("OnUpdate",nil); root:EnableKeyboard(false)
+        shown=false; transitioning=false; entrance=0; bottomHeight=0; layout=nil
+        preparing=false; waiting=false; refreshPending=false; root:SetScript("OnUpdate",nil); root:EnableKeyboard(false)
         root:SetPropagateKeyboardInput(true); root:Hide(); model,speech=nil,nil
         if questPaper then questPaper.Hide() end
     end

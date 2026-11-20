@@ -96,7 +96,7 @@ function API.Code(fault)
     local message=type(plain(fault))=="table" and field(fault,"message") or plain(fault)
     message=text(message,2048)
     if message then
-        for _, code in ipairs({"layout_unavailable","font_unavailable","native_frame_restricted","native_frame_unavailable",
+        for _, code in ipairs({"preparation_timeout","layout_unavailable","font_unavailable","native_frame_restricted","native_frame_unavailable",
             "native_restore_failed","interaction_unavailable","defer_unavailable","quest_native_required","quest_state_unavailable"}) do
             if message:find(code,1,true) then return code end
         end

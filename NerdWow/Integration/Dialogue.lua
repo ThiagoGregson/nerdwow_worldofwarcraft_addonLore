@@ -43,101 +43,105 @@ end
 local function cleanText(text)
     return text and text:gsub("|c%x%x%x%x%x%x%x%x",""):gsub("|r",""):match("^%s*(.-)%s*$")
 end
-local function readTitle(r,npc,localizedFaction)
-    local trace,decisions,redacted={},{},false
-    local function raw(value)
-        if issecretvalue and issecretvalue(value) then redacted=true; return "<secret>" end
-        if type(value)=="string" then return string.format("%q",value) end
-        if type(value)=="number" and value==value and math.abs(value)<=MAX then return tostring(value) end
-        return "<"..type(value)..">"
+-- Use the client's localized level template: Retail can report all detail
+-- lines as None. Row two by itself is never evidence of an NPC title.
+local function levelMatcher(template)
+    template=cleanText(template)
+    if not template then return end
+    local pattern,literal,tokens={},false,0
+    local position=1
+    while position<=#template do
+        local char=template:sub(position,position)
+        if char=="%" then
+            local tail=template:sub(position)
+            local token=tail:match("^%%[1-9]%d*%$[sd]") or tail:match("^%%[sd]")
+            if token then
+                tokens=tokens+1; pattern[#pattern+1]=token:sub(-1)=="d" and "(%d+)" or "(.-)"
+                position=position+#token
+            elseif template:sub(position,position+1)=="%%" then
+                pattern[#pattern+1]="%%"; literal=true; position=position+2
+            else return end
+        else
+            pattern[#pattern+1]=char:gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])","%%%1")
+            if char:match("%S") then literal=true end
+            position=position+1
+        end
     end
+    if not literal or tokens==0 or tokens>4 then return end
+    local match="^"..table.concat(pattern).."$"
+    return function(text)
+        if not text then return false end
+        local fields={text:match(match)}
+        for _,value in ipairs(fields) do
+            if value:match("^%d+$") or value:match("^%d+%s+%S") then return true end
+        end
+        return false
+    end
+end
+local function readTitle(r,npc,localizedFaction)
     local types=type(Enum)=="table" and Enum.TooltipDataLineType or {}
     local levelType,unitType=types.UnitLevel or 47,types.UnitType or 48
-    local function inspect(data,source)
-        trace[#trace+1]="source="..source
-        local rawData=data
+    local matchesLevel=levelMatcher(r.String(TOOLTIP_UNIT_LEVEL))
+    local function inspect(data)
         data=r.Table(data)
-        if not data then trace[#trace+1]="data="..raw(rawData); return nil,"data_unavailable" end
-        -- A supplied identity is authoritative; never use a tooltip for another unit.
-        local hiddenGUID=issecretvalue and issecretvalue(data.guid)
+        if not data then return nil,"data_unavailable" end
         local dataGUID=r.String(data.guid)
-        local identityOK=not hiddenGUID and (dataGUID==nil and r.Plain(data.guid)==nil or dataGUID==npc.guid)
-        if hiddenGUID then redacted=true end
+        if issecretvalue and issecretvalue(data.guid) then return nil,"identity_restricted" end
+        if r.Plain(data.guid)~=nil and dataGUID~=npc.guid then return nil,"identity_mismatch" end
         local lines=r.Table(data.lines)
-        if not lines then trace[#trace+1]="lines="..raw(data.lines); return nil,"lines_unavailable" end
+        if not lines then return nil,"lines_unavailable" end
         local rows={}
         for index=1,12 do
-            local rawLine=lines[index]
-            if not (issecretvalue and issecretvalue(rawLine)) and rawLine==nil then break end
-            local line=r.Table(rawLine)
-            local row={}
-            rows[index]=row
-            if line then
-                trace[#trace+1]=index..": type="..raw(line.type).." left="..raw(line.leftText).." right="..raw(line.rightText)
-                    .." args="..raw(line.args)
-                row.text=cleanText(r.String(line.leftText))
-                row.kind=r.Number(line.type,0)
-                row.blocked=issecretvalue and (issecretvalue(line.type) or issecretvalue(line.leftText))
-                if r.Plain(line.type)~=nil and row.kind==nil then row.blocked=true end
-                -- A secret/missing field cannot become a blank separator.
-                row.blank=(row.kind==1 or row.text~=nil and row.text=="")
-            else trace[#trace+1]=index..": line="..raw(rawLine) end
+            local value=r.Plain(lines[index])
+            if value==nil then
+                if issecretvalue and issecretvalue(lines[index]) then return nil,"line_restricted" end
+                break
+            end
+            local line=r.Table(value)
+            if not line then return nil,"invalid_line" end
+            local text=cleanText(r.String(line.leftText))
+            local kind=r.Number(line.type,0)
+            if issecretvalue and (issecretvalue(line.type) or issecretvalue(line.leftText)) then return nil,"line_restricted" end
+            if r.Plain(line.type)~=nil and kind==nil then return nil,"invalid_line_type" end
+            if kind~=1 and text~="" then
+                rows[#rows+1]={text=text,kind=kind}
+                if #rows>1 and (kind==levelType or matchesLevel and matchesLevel(text)) then break end
+            end
         end
-        if not identityOK then return nil,hiddenGUID and "identity_restricted" or "identity_mismatch" end
-        local function nextRow(position)
-            for index=position,#rows do if not rows[index].blank then return rows[index],index end end
+        if not npc.name or not rows[1] or rows[1].text~=npc.name then return nil,"header_mismatch" end
+        for index=2,#rows do
+            local row=rows[index]
+            if row.kind==levelType or matchesLevel and matchesLevel(row.text) then
+                if index==2 then return nil,"no_title" end
+                local candidate=rows[index-1]
+                if not candidate.text or candidate.kind~=nil and candidate.kind~=(types.None or 0) then
+                    return nil,"invalid_title_line"
+                end
+                local title=candidate.text:match("^<([^<>]+)>$") or candidate.text
+                title=cleanText(title)
+                if title=="" or title==npc.name or title==npc.faction or title==localizedFaction
+                    or candidate.kind==unitType then return nil,"invalid_title_line" end
+                return title,"applied"
+            end
         end
-        local header,index=nextRow(1)
-        local row,subtitleIndex=nextRow((index or 0)+1)
-        if not row then return nil,"subtitle_unavailable" end
-        if row.blocked then return nil,"text_or_type_restricted" end
-        if row.kind==levelType or row.kind==unitType then return nil,"level_or_creature_type" end
-        if row.kind~=nil and row.kind~=(types.None or 0) then return nil,"unsupported_line_type" end
-        local text=row.text
-        if not text or text=="" then return nil,"text_unavailable_or_restricted" end
-        if text==npc.name or text==npc.faction or text==localizedFaction then return nil,"name_or_faction" end
-        if not npc.name or not header or not header.text or header.blocked or header.text~=npc.name
-            or header.kind==levelType or header.kind==unitType then
-            return nil,"header_mismatch_or_restricted"
+        return nil,matchesLevel and "level_boundary_missing" or "localized_level_unavailable"
+    end
+    local title,reason=inspect(r.Call(type(C_TooltipInfo)=="table" and C_TooltipInfo.GetUnit,"npc"))
+    if not title and reason~="no_title" and npc.guid and type(UnitTokenFromGUID)=="function" then
+        local token=r.String(r.Call(UnitTokenFromGUID,npc.guid))
+        if token and token~="npc" and r.String(r.Call(UnitGUID,token))==npc.guid then
+            title,reason=inspect(r.Call(type(C_TooltipInfo)=="table" and C_TooltipInfo.GetUnit,token))
         end
-        local bracketed=text:match("^<([^<>]+)>$")
-        if bracketed then return bracketed,"accepted_brackets" end
-        local following=nextRow(subtitleIndex+1)
-        if following and (following.kind==levelType or following.kind==unitType) then return text,"accepted_plain" end
-        return nil,"no_typed_level_boundary"
     end
-    local function probe(fn,source,...)
-        if type(fn)~="function" then decisions[#decisions+1]=source..": api_unavailable"; return nil end
-        local data=r.Call(fn,...)
-        local value,reason=inspect(data,source)
-        trace[#trace+1]="decision="..reason
-        decisions[#decisions+1]=source..": "..reason
-        return value
-    end
-    local title=probe(type(C_TooltipInfo)=="table" and C_TooltipInfo.GetUnit,"npc","npc")
-    if not title and npc.guid and type(UnitTokenFromGUID)=="function" then
-        local rawToken=r.Call(UnitTokenFromGUID,npc.guid)
-        local hidden=issecretvalue and issecretvalue(rawToken)
-        local token=r.String(rawToken)
-        if hidden then redacted=true; decisions[#decisions+1]="resolved_unit: token_restricted"
-        elseif token and token~="npc" and r.String(r.Call(UnitGUID,token))==npc.guid then
-            title=probe(type(C_TooltipInfo)=="table" and C_TooltipInfo.GetUnit,"resolved_unit",token)
-        else decisions[#decisions+1]="resolved_unit: unavailable_or_identity_mismatch" end
-    end
-    if not title and npc.guid and GameTooltip and type(GameTooltip.GetPrimaryTooltipData)=="function" then
+    if not title and reason~="no_title" and npc.guid and GameTooltip and type(GameTooltip.GetPrimaryTooltipData)=="function" then
         local data=r.Table(r.Call(GameTooltip.GetPrimaryTooltipData,GameTooltip))
-        local hidden=data and issecretvalue and issecretvalue(data.guid)
-        if hidden then redacted=true; decisions[#decisions+1]="native_tooltip: identity_restricted"
-        elseif data and r.String(data.guid)==npc.guid then
-            local reason
-            title,reason=inspect(data,"native_tooltip"); trace[#trace+1]="decision="..reason
-            decisions[#decisions+1]="native_tooltip: "..reason
-        else decisions[#decisions+1]="native_tooltip: unavailable_or_identity_mismatch" end
+        if data and r.String(data.guid)==npc.guid then title,reason=inspect(data) end
     end
-    if not titleSeen[npc.creatureID] and titleCount<128 then
+    -- No routine raw probes: log only failures, once per NPC, without any text
+    -- from the tooltip or any GUID/secret values.
+    if not title and reason~="no_title" and not titleSeen[npc.creatureID] and titleCount<128 then
         titleSeen[npc.creatureID]=true; titleCount=titleCount+1
-        addon.DiagnosticAPI.Record("interface","npc_title_probe",{message="result="..(title and "applied" or "omitted")
-            .."\n"..table.concat(decisions,"; ").."\n"..table.concat(trace,"\n"),redacted=redacted or nil},
+        addon.DiagnosticAPI.Record("interface","npc_title_unavailable",{message=reason},
             {stage="npc_title",creatureID=npc.creatureID})
     end
     return title

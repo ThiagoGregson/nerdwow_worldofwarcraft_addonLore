@@ -119,5 +119,14 @@ for _,moment in ipairs({"OFFER","PROGRESS","COMPLETE"}) do
     if moment=="COMPLETE" then s.c.Choose(2) end
     html[#html+1]='<h2>'..moment..'</h2>'..draw(s)
 end
+-- Advance widths from the bundled Cinzel Bold hmtx; the rest remains approximate.
+for _,sample in ipairs({{"M",.953},{"W",.971},{"Á",.717}}) do
+    local s=fixtures.scene("OFFER")
+    s.r.glyphWidths={[sample[1]]=sample[2]}
+    s.source.quest.title="Perigo anfíbio"
+    s.source.quest.description=sample[1].."ísthica, preciso de sua ajuda. Os murlocs estão cada vez mais perto da vila.\n\nVolte quando a estrada estiver segura."
+    s.c.Refresh(); s.c.Complete(); s.root().scripts.OnUpdate(s.root(),1)
+    html[#html+1]='<h2>Capitular '..sample[1]..'</h2>'..draw(s)
+end
 html[#html+1]='</main></html>'
 return table.concat(html)

@@ -29,6 +29,15 @@ function Quest.Drop(text)
     local byte=text:byte(start)
     if byte<128 and not text:sub(start,start):match("%a") then return nil,text end
     local size=byte>=240 and 4 or byte>=224 and 3 or byte>=192 and 2 or 1
+    if size>1 then
+        local second=text:byte(start+1)
+        if not second or second<128 or second>=192 then return nil,text end
+        local code=size==2 and second and (byte-192)*64+second-128 or 0
+        if not (code>=192 and code<=214 or code>=216 and code<=246 or code>=248 and code<=591) then return nil,text end
+    end
+    -- A decomposed accent belongs with its base; leave that grapheme intact.
+    local nextByte=text:byte(start+size)
+    if nextByte==204 or nextByte==205 then return nil,text end
     return text:sub(start,start+size-1),text:sub(1,start-1)..text:sub(start+size)
 end
 function Quest.Objective(objective)

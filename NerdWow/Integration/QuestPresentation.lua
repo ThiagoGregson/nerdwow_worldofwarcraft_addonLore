@@ -32,6 +32,16 @@ function Platform.ReadState(model)
     elseif model.moment=="PROGRESS" then
         state.canComplete=call(IsQuestCompletable)
         if type(state.canComplete)~="boolean" then error("quest_state_unavailable") end
+        state.requiredOwned={}
+        if type(C_Item)=="table" and type(C_Item.GetItemCount)=="function" then
+            local r=addon.DialogueAPI.Reader()
+            for _,item in ipairs(model.requiredItems or {}) do
+                if item.itemID then
+                    local count=r.Number(r.Call(C_Item.GetItemCount,item.itemID),0)
+                    if count~=nil then state.requiredOwned[item.index]={itemID=item.itemID,count=count} end
+                end
+            end
+        end
     elseif model.moment=="COMPLETE" then
         state.choiceCount=call(GetNumQuestChoices)
         if type(state.choiceCount)~="number" or state.choiceCount<0 or state.choiceCount>256

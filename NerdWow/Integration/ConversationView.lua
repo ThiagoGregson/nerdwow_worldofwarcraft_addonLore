@@ -4,7 +4,7 @@ addon.ConversationView = View
 local CIRCLE="Interface\\CHARACTERFRAME\\TempPortraitAlphaMask"
 local handle,root,callbacks,shown,model,speech
 local top,bottom,edgeLeft,edgeRight,crest,crestShadow,name,title,zone,subzone,hint,scroll,child,line,exit
-local optionScroll,optionChild,more
+local optionScroll,optionChild,more,optionsMore
 local paragraphs,paragraphData={},{}
 local buttons={}
 local entrance,bottomHeight,layout=0,0,nil
@@ -139,7 +139,16 @@ local function reveal(text)
 end
 local function scrollHint()
     local range=scroll:GetVerticalScrollRange()
-    more:SetText(range>0 and (scroll:GetVerticalScroll()<range-1 and addon.Text.cinemaMore or addon.Text.cinemaPrevious) or "")
+    more:SetText(range>1 and (scroll:GetVerticalScroll()<range-1 and addon.Text.cinemaMore or addon.Text.cinemaPrevious) or "")
+    range=optionScroll:GetVerticalScrollRange()
+    optionsMore:SetText(range>1 and (optionScroll:GetVerticalScroll()<range-1
+        and addon.Text.cinemaOptionsMore or addon.Text.cinemaOptionsPrevious) or "")
+end
+local function keyHint()
+    if model and speech then
+        local text=addon.Conversation.Hint(model,not speech.IsComplete())
+        if hint:GetText()~=text then hint:SetText(text) end
+    end
 end
 local function place()
     if not shown or not model then return end
@@ -173,7 +182,7 @@ local function place()
     zone:ClearAllPoints(); zone:SetPoint("TOPLEFT",root,"TOPLEFT",(width-zoneGroup)/2,-6*s)
     subzone:ClearAllPoints(); subzone:SetPoint("TOPLEFT",zone,"TOPRIGHT",12*s,-3*s)
     hint:ClearAllPoints(); hint:SetPoint("TOPRIGHT",root,"TOPRIGHT",-48*s,-layout.top+17*s)
-    local _,hintHeight=fit(hint,model.kind=="quest" and addon.Text.questHint or addon.Text.cinemaHint,"EBGaramond-Regular",12*s,10*s,width*.65)
+    local _,hintHeight=fit(hint,addon.Conversation.Hint(model,not speech.IsComplete()),"EBGaramond-Regular",12*s,10*s,width*.65)
     hint:ClearAllPoints(); hint:SetPoint("TOPRIGHT",root,"TOPRIGHT",-48*s,-layout.top+hintHeight+4*s)
     color(hint,model.theme.muted,.8)
     font(exit.label,"Cinzel-Regular",24*s); color(exit.label,model.theme.muted)
@@ -245,6 +254,9 @@ local function place()
     more:ClearAllPoints(); more:SetPoint("TOPLEFT",root,"BOTTOMLEFT",left,boxes.speechBottom-2*s)
     font(more,"EBGaramond-Regular",12*s); color(more,model.theme.muted,.8)
     more:SetSize(widthText,14*s); more:SetWordWrap(false)
+    optionsMore:ClearAllPoints(); optionsMore:SetPoint("BOTTOMLEFT",root,"BOTTOMLEFT",left,18*s)
+    font(optionsMore,"EBGaramond-Regular",12*s); color(optionsMore,model.theme.muted,.8)
+    optionsMore:SetSize(widthText,14*s); optionsMore:SetWordWrap(false)
     scroll:UpdateScrollChildRect(); optionScroll:UpdateScrollChildRect()
     scroll:SetVerticalScroll(math.min(scroll:GetVerticalScroll(),scroll:GetVerticalScrollRange()))
     optionScroll:SetVerticalScroll(math.min(optionScroll:GetVerticalScroll(),optionScroll:GetVerticalScrollRange()))
@@ -281,10 +293,10 @@ local function update(_,delta)
         local t=entrance/.9
         local eased=1-(1-t)^3
         top:SetHeight(math.max(.01,layout.top*eased)); bottom:SetHeight(math.max(.01,bottomHeight*eased))
-        for _, object in ipairs({name,title,zone,subzone,hint,crest,crestShadow,scroll,optionScroll,more,exit}) do object:SetAlpha(eased) end
+        for _, object in ipairs({name,title,zone,subzone,hint,crest,crestShadow,scroll,optionScroll,more,optionsMore,exit}) do object:SetAlpha(eased) end
     end
     local text,changed=speech.Advance(delta)
-    if changed then reveal(text) end
+    if changed then reveal(text); keyHint() end
     if entrance==.9 and speech.IsComplete() then root:SetScript("OnUpdate",nil) end
 end
 function View.New(newCallbacks)
@@ -323,8 +335,9 @@ function View.New(newCallbacks)
     optionScroll:SetScrollChild(optionChild); optionScroll:EnableMouseWheel(true)
     optionScroll:SetScript("OnMouseWheel",safe(function(_,delta)
         optionScroll:SetVerticalScroll(math.max(0,math.min(optionScroll:GetVerticalScrollRange(),optionScroll:GetVerticalScroll()-delta*42*layout.scale)))
+        scrollHint()
     end))
-    more=label(root)
+    more,optionsMore=label(root),label(root)
     exit=CreateFrame("Button",nil,root); exit.label=label(exit); exit.label:SetAllPoints(); exit.label:SetJustifyH("CENTER")
     exit.label:SetText("×"); exit:SetScript("OnClick",safe(function() callbacks.Close() end))
     exit:SetScript("OnEnter",safe(function() color(exit.label,"ffffff") end))
@@ -387,7 +400,7 @@ function View.New(newCallbacks)
         scroll:SetVerticalScroll(0)
         optionScroll:SetVerticalScroll(0); scrollHint()
         top:SetHeight(.01); bottom:SetHeight(.01)
-        for _, object in ipairs({name,title,zone,subzone,hint,crest,crestShadow,scroll,optionScroll,more,exit}) do object:SetAlpha(0) end
+        for _, object in ipairs({name,title,zone,subzone,hint,crest,crestShadow,scroll,optionScroll,more,optionsMore,exit}) do object:SetAlpha(0) end
         if faulted or not shown then return false,"view_failed",dimensions() end
         root:EnableKeyboard(true); root:SetPropagateKeyboardInput(true); root:SetAlpha(1)
         root:SetScript("OnUpdate",safe(update,"OnUpdate"))
@@ -398,7 +411,7 @@ function View.New(newCallbacks)
         root:SetPropagateKeyboardInput(true); root:Hide(); model,speech=nil,nil
         if questPaper then questPaper.Hide() end
     end
-    function handle.Complete() if speech then reveal(speech.Complete()) end end
+    function handle.Complete() if speech then reveal(speech.Complete()); keyHint() end end
     function handle.IsTyping() return speech and not speech.IsComplete() or false end
     function handle.Selection(value) if questPaper then questPaper.Selection(value) end end
     function handle.Recorded(kind) if questPaper then questPaper.Recorded(kind) end end

@@ -18,7 +18,7 @@ end
 local function core()
     local namespace = {}
     local environment = setmetatable({ type = type, math = math, string = string,
-        pairs = pairs, ipairs = ipairs, table = table, tonumber = tonumber, pcall = pcall, error = error }, {
+        pairs = pairs, ipairs = ipairs, table = table, tonumber = tonumber, tostring = tostring, pcall = pcall, error = error }, {
         __index = function(_, key) error("Global proibida no núcleo: " .. key) end,
     })
     loadModule("Dialogue/Quest.lua", namespace, environment)
@@ -345,6 +345,7 @@ local function client(saved, settings, absentSettings)
         time = function() return TIME end,
         SlashCmdList = {}, date = os.date, StaticPopupDialogs = {},
         UIParent = false, GameFontNormal = {},Enum={TooltipDataLineType={None=0,UnitName=2,UnitLevel=47,UnitType=48}},C_QuestInfoSystem=false,
+        UnitTokenFromGUID=false,C_Item=false,
     }
     env.InCombatLockdown = function() return state.inCombat end
     env.C_UI = { Reload = function() state.reloads = state.reloads + 1 end }
@@ -611,7 +612,7 @@ test("metadados e carregamento real do TOC", function()
     equal(metadata.Interface, "120105")
     equal(metadata.Title, "NerdWow")
     equal(metadata.Author, "Greg")
-    equal(metadata.Version, "0.7.0")
+    equal(metadata.Version, "0.7.1")
     equal(metadata.SavedVariables, "NerdWow_Journal, NerdWow_Settings, NerdWow_Diagnostics")
     equal(#order, 29)
     for _, path in ipairs(order) do assert(not path:find("Tests/", 1, true)) end
@@ -648,7 +649,7 @@ test("entrada, status pt-BR e ajuda", function()
     equal(events[2].type, "LOCATION_CHANGED")
     equal(events[2].timestamp, TIME)
     c.command()
-    assert(c.messages[1]:find("v0.7.0 | esquema 1 | 2 eventos", 1, true))
+    assert(c.messages[1]:find("v0.7.1 | esquema 1 | 2 eventos", 1, true))
     assert(c.messages[1]:find("mudança de local", 1, true))
     assert(c.messages[1]:find("UTC", 1, true))
     assert(c.messages[2]:find("/reload", 1, true))
@@ -1166,7 +1167,7 @@ test("dica mostra versão, totais, pendentes, UTC e instruções em pt-BR", func
     local c = client()
     c.start()
     local text = tooltipText(c)
-    for _, expected in ipairs({ "NerdWow v0.7.0", "Eventos no diário: 2",
+    for _, expected in ipairs({ "NerdWow v0.7.1", "Eventos no diário: 2",
         "Novos desta sessão aguardando gravação: 2", "Último evento:", "UTC",
         "Clique esquerdo: sincronizar", "Arraste com o botão esquerdo" }) do
         assert(text:find(expected, 1, true), expected)

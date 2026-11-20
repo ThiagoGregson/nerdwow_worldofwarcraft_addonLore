@@ -100,8 +100,19 @@ for _,name in ipairs({"Cinzel-Regular","Cinzel-Bold","EBGaramond-Regular","EBGar
 end
 local html={'<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>NerdWow · revisão externa 2.2</title><style>',
     table.concat(styles),'body{margin:0;padding:22px;background:#151416;color:#e8d8b4;font:16px EBGaramond-Regular}main{width:1280px;margin:auto}h2{font:18px Cinzel-Regular;margin:20px 0 10px}svg{display:block;width:1280px;height:720px;border:1px solid #514330}</style><main><p>Revisão externa do renderer Lua · geometria real da simulação; métricas e bitmaps nativos aproximados. Não é captura do Retail.</p>'}
+local talk=fixtures.conversationScene()
+local talkRoot=talk.open(); talk.view.Complete(); talkRoot.scripts.OnUpdate(talkRoot,1)
+html[#html+1]='<h2>GOSSIP · Fábio</h2>'..draw(talk)
 for _,moment in ipairs({"OFFER","PROGRESS","COMPLETE"}) do
     local s=fixtures.scene(moment)
+    if moment=="PROGRESS" then
+        s.source.npc={name="Durval Pilão",faction="Alliance"}
+        s.source.quest.title="Velas dos Kobolds"; s.source.quest.progressText="Você já coletou as velas?"
+        s.source.location={zone="Floresta de Elwynn",subZone="Vila d'Ouro",mapID=37}
+        s.source.objectives={{index=1,text="0/8 Vela Grande",fulfilled=0,required=8}}
+        s.source.requiredItems={{index=1,itemID=772,name="Vela Grande",icon=133750,quality=1,quantity=8}}
+        s.r.env.C_Item={GetItemCount=function() return 0 end}
+    end
     s.receipt={questID=101,kind=moment=="OFFER" and "QUEST_OFFERED" or "QUEST_PROGRESS_VIEWED"}
     s.completable=moment=="PROGRESS"
     s.c.Refresh(); s.root().scripts.OnUpdate(s.root(),1)

@@ -137,7 +137,7 @@ function View.New(parent,options)
         b.light=solid(b,"9e2a35",.14,"ARTWORK"); b.light:SetAllPoints(); b.light:SetAlpha(0)
         b.border=solid(b,"ffffff",1,"ARTWORK")
         b.icon=texture(b,"OVERLAY")
-        b.name=makeLabel(b); b.quantity=makeLabel(b); b.number=makeLabel(b)
+        b.name=makeLabel(b); b.quantity=makeLabel(b); b.number=makeLabel(b); b.count=makeLabel(b)
         b.edges={}
         for edge=1,4 do b.edges[edge]=solid(b,"9e2a35",.85,"OVERLAY") end
         items[index]=b
@@ -162,6 +162,13 @@ function View.New(parent,options)
             b.name:SetTextColor(r*.52,g*.52,blue*.52,1)
             local height=options.Height(b.name,item.name or addon.Text.questUnknownItem,"EBGaramond-Regular",14*s,cardWidth-57*s)
             b.name:SetShadowOffset(0,0)
+            local count=addon.QuestPresentation.ItemCount(item,kind=="required")
+            b.count:ClearAllPoints(); b.count:SetPoint("TOPLEFT",b,"TOPLEFT",47*s,-8*s-height)
+            font(b.count,"EBGaramond-Regular",12*s,"6e5942")
+            if count~="" then
+                height=height+options.Height(b.count,count,"EBGaramond-Regular",12*s,cardWidth-57*s)
+                b.count:SetShadowOffset(0,0)
+            else b.count:SetText("") end
             b:SetSize(cardWidth,math.max(48*s,height+16*s))
             b.border:ClearAllPoints(); b.border:SetPoint("TOPLEFT",b,"TOPLEFT",6*s,-7*s); b.border:SetSize(34*s,34*s)
             b.border:SetColorTexture(r,g,blue,.95)
@@ -339,11 +346,14 @@ function View.New(parent,options)
                 marker[1]:SetPoint("TOPLEFT",child,"TOPLEFT",1*s,-y-7*s); marker[1]:SetSize(7*s,7*s)
                 marker[2]:ClearAllPoints(); marker[2]:SetPoint("CENTER",marker[1],"CENTER",0,0)
                 marker[2]:SetSize(4*s,4*s); marker[2]:SetAlpha(objective.finished and 0 or 1); marker[2]:Show()
-                local count=objective.fulfilled~=nil and objective.required~=nil
-                    and tostring(objective.fulfilled).."/"..tostring(objective.required) or ""
-                local height=text(objective.text or "",
-                    "EBGaramond-Regular",16*s,17*s,y,width-71*s,objective.finished and "8b7964" or "352416")
-                text(count,"Cinzel-Regular",12*s,width-50*s,y+3*s,50*s,"6e5942")
+                local caption,count=addon.QuestPresentation.Objective(objective)
+                local reserve=count~="" and math.max(50*s,options.Width(count,"Cinzel-Regular",12*s)+4*s) or 0
+                local height=text(caption,"EBGaramond-Regular",16*s,17*s,y,width-21*s-reserve,
+                    objective.finished and "8b7964" or "352416")
+                if count~="" then
+                    local countHeight=text(count,"Cinzel-Regular",12*s,width-reserve,y+3*s,reserve,"6e5942")
+                    height=math.max(height,countHeight)
+                end
                 y=y+height+5*s
             end
             y=y+9*s
@@ -394,7 +404,14 @@ function View.New(parent,options)
         end
         for index=labelIndex+1,#labels do labels[index]:Hide() end
         for index=itemIndex+1,#items do items[index]:Hide() end
-        child:SetHeight(math.max(1,y+12*s)); scroll:UpdateScrollChildRect()
+        local contentHeight=math.max(1,y+12*s)
+        -- Measure in the final fonts at the final width before choosing height.
+        -- All resizing happens in this layout pass, without replaying opening.
+        layout.paperHeight=addon.QuestPresentation.PaperHeight(layout,contentHeight)
+        root:SetHeight(layout.paperHeight); paper:SetHeight(layout.paperHeight)
+        shadeLeft:SetHeight(layout.paperHeight); shadeRight:SetHeight(layout.paperHeight)
+        scroll:SetHeight(layout.paperHeight-140*s); track:SetHeight(scroll:GetHeight())
+        child:SetHeight(contentHeight); scroll:UpdateScrollChildRect()
         scroll:SetVerticalScroll(math.min(scroll:GetVerticalScroll(),scroll:GetVerticalScrollRange()))
         font(more,"EBGaramond-Italic",11*s,"786148")
         more:ClearAllPoints(); more:SetPoint("BOTTOMLEFT",paper,"BOTTOMLEFT",39*s,88*s); more:SetSize(width,16*s)

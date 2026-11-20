@@ -31,6 +31,22 @@ function Quest.Drop(text)
     local size=byte>=240 and 4 or byte>=224 and 3 or byte>=192 and 2 or 1
     return text:sub(start,start+size-1),text:sub(1,start-1)..text:sub(start+size)
 end
+function Quest.Objective(objective)
+    local text=objective.text or ""
+    local plain=text:gsub("|c%x%x%x%x%x%x%x%x",""):gsub("|r","")
+    if plain:find("%d+%s*/%s*%d+") then return text,"" end
+    local count=objective.fulfilled~=nil and objective.required~=nil
+        and tostring(objective.fulfilled).."/"..tostring(objective.required) or ""
+    return text,count
+end
+function Quest.ItemCount(item,required)
+    if not required then return "" end
+    if item.quantity~=nil then
+        return string.format(item.owned~=nil and addon.Text.questOwnedCount or addon.Text.questRequiredCount,
+            tostring(item.owned~=nil and item.owned or item.quantity),tostring(item.quantity))
+    end
+    return item.owned~=nil and string.format(addon.Text.questOwnedOnly,tostring(item.owned)) or ""
+end
 function Quest.Build(input,state,receipt)
     local model,code=addon.QuestDialogue.Snapshot(input)
     if not model then return nil,code end
@@ -38,6 +54,11 @@ function Quest.Build(input,state,receipt)
     if state.nativeRequired then return nil,"quest_native_required" end
     local rewards=model.moment~="PROGRESS" and model.rewards or nil
     local choices=rewards and rewards.choices or {}
+    local required=model.moment=="PROGRESS" and model.requiredItems or {}
+    for _,item in ipairs(required or {}) do
+        local owned=state.requiredOwned and state.requiredOwned[item.index]
+        if owned and owned.itemID==item.itemID then item.owned=owned.count end
+    end
     if model.moment=="COMPLETE" and (type(state.choiceCount)~="number" or state.choiceCount~=#choices) then
         return nil,"quest_state_unavailable"
     end
@@ -48,7 +69,7 @@ function Quest.Build(input,state,receipt)
         theme=addon.DialogueThemes.Resolve(model.location,model.npc),text=Quest.Short(text),entries={},state=state,
         paper={title=model.quest.title or addon.Text.questUnknownTitle,kind=state.kind,
             text=text,objectiveText=model.moment=="OFFER" and model.quest.objectiveText or nil,objectives=model.objectives or {},
-            requiredItems=model.moment=="PROGRESS" and model.requiredItems or {},choices=choices,fixed=rewards and rewards.fixed or {},
+            requiredItems=required or {},choices=choices,fixed=rewards and rewards.fixed or {},
             money=rewards and rewards.money,experience=rewards and rewards.experience}}
     if model.moment=="COMPLETE" then
         for _,item in ipairs(choices) do
@@ -96,4 +117,7 @@ function Quest.Layout(width,height,lineWidth)
     layout.textLeft=(available-layout.textWidth-84*s)/2+84*s
     layout.contentWidth=layout.textWidth+84*s
     return layout
+end
+function Quest.PaperHeight(layout,contentHeight)
+    return math.min(layout.paperHeight,math.max(360*layout.scale,contentHeight+140*layout.scale))
 end

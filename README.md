@@ -61,6 +61,8 @@ Para atualizar, substitua a pasta `NerdWow` pela versão nova e reinicie o jogo.
 
 Ao escolher uma missão, o pergaminho abre à direita e mantém a legenda do NPC visível.
 
+As opções permanecem na barra inferior; quando necessário, a fala e as opções têm rolagens independentes, com indicação para continuar a leitura. A dica de teclas acompanha as ações disponíveis.
+
 ### Na missão
 
 | Momento | Como usar |
@@ -70,6 +72,8 @@ Ao escolher uma missão, o pergaminho abre à direita e mantém a legenda do NPC
 | Conclusão | Clique numa recompensa ou use **1–9**, depois **Concluir**; uma única opção já vem selecionada |
 | Ler e comparar | Role o mouse sobre o papel e passe sobre os itens para ver o tooltip |
 | Completar a fala ou fechar | **Espaço** completa a legenda; **Esc** ou **×** fecha a missão |
+
+O pergaminho ajusta a altura ao conteúdo e rola quando chega ao limite. Nos itens exigidos, mostra a quantidade necessária e a quantidade em posse quando disponível.
 
 A nota no rodapé aparece quando a oferta ou o progresso foi registrado no diário. A conclusão é registrada após a entrega confirmada pelo jogo. O arquivo em disco continua sendo gravado ao sincronizar, usar `/reload` ou sair do jogo.
 

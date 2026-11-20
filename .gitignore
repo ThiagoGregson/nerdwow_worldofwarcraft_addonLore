@@ -63,3 +63,27 @@ TestResults/
 dist/
 build/
 *.zip
+
+# ---------------------------------------------------------------------------
+# App Nerd-Wow portátil (App/)
+# Só o executável e os arquivos de distribuição vão para o GitHub.
+# Dados do usuário, diário importado, configurações locais e chaves
+# de serviços (por exemplo TTS) nunca ficam versionados.
+# ---------------------------------------------------------------------------
+App/data/
+App/cache/
+App/logs/
+App/temp/
+App/exports/
+App/**/*.db
+App/**/*.sqlite
+App/**/*.sqlite3
+App/**/*.local.*
+App/**/settings.user.*
+# Artefatos de compilação que não fazem parte do portátil
+*.pdb
+*.ilk
+*.obj
+*.exp
+*.iobj
+*.ipdb

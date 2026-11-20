@@ -48,6 +48,7 @@ local function scene(moment,async)
         Show=function() s.tipShown=true end,IsOwned=function(_,owner) return owner==s.owner end,
         Hide=function() s.owner=nil; s.tipShown=false end}
     env.C_Texture={GetAtlasInfo=function() return {} end}
+    t.loadModule("Integration/Dialogue.lua",n,env)
     t.loadModule("Integration/QuestPresentation.lua",n,env)
     s.c=n.ConversationController.New({GetModel=function() return s.source end,IsEnabled=function() return not s.disabled end,
         Prepare=function(model) return n.QuestPresentation.Build(model,n.QuestPlatform.ReadState(model),s.receipt) end,
@@ -113,7 +114,7 @@ end)
 test("renderer do pergaminho exibe papel capitular itens rodapé e nota real nos três momentos",function()
     for _,moment in ipairs({"OFFER","PROGRESS","COMPLETE"}) do
         local s=scene(moment); s.receipt={questID=101,kind=moment=="OFFER" and "QUEST_OFFERED" or "QUEST_PROGRESS_VIEWED"}
-        s.c.Refresh(); equal(s.reports,0); equal(s.root().shown,true); equal(s.p.env.QuestFrame.alpha,0)
+        s.c.Refresh(); assert(s.reports==0,s.fault and s.fault.message); equal(s.root().shown,true); equal(s.p.env.QuestFrame.alpha,0)
         s.root().scripts.OnUpdate(s.root(),1)
         assert(s.text(s.source.quest.title)); assert(s.text("Arquivista Velann · Guardiã dos Tomos Queimados"))
         if moment=="OFFER" then assert(s.text("Á")); assert(s.button("Aceitar")); assert(s.button("Recusar")) end
@@ -360,4 +361,282 @@ test("estado restrito ou autoaceite alterado não executa ação antiga",functio
     assert(s.fault.message:find("restricted_interface",1,true)); assert(s.fault.stack)
 end)
 
-return {scene=scene,source=source}
+local function conversationScene(many)
+    local n=core(); local r=t.surfaces.renderer(n)
+    local model={moment="GOSSIP",npc={name="Estalajadeiro Fábio",title="Hospedagem",faction="Alliance"},
+        location={zone="Floresta de Elwynn",subZone="Estalagem do Leão Orgulhoso"},
+        text="Bem-vinda à minha estalagem, viajante cansada. O que posso fazer por você?",options={}}
+    local texts={"O que posso fazer numa estalagem?","Vincule sua pedra de regresso a esta estalagem.",
+        "Quero ver o que você tem à venda."}
+    for index=1,many or 3 do
+        model.options[index]={index=index,optionID=8000+index,text=texts[(index-1)%3+1]}
+    end
+    local s={n=n,r=r,source=model}
+    s.view=n.ConversationView.New({Error=function(fault) error(fault.message) end})
+    function s.open() assert(s.view.Show(assert(n.Conversation.Build(model)))); return r.frames[1] end
+    return s
+end
+
+test("três opções do Fábio cabem inteiras e fala cede espaço em todas as escalas",function()
+    for _,size in ipairs({{1920,1080},{2560,1440},{3440,1440},{5120,1440}}) do
+        for _,scale in ipairs({.64,.8,1,1.25}) do
+            local s=conversationScene(); s.r.parent:SetSize(size[1]/scale,size[2]/scale)
+            local root=s.open(); s.view.Complete(); root.scripts.OnUpdate(root,1)
+            local speechScroll,options=s.r.frames[2],s.r.frames[4]
+            equal(options:GetVerticalScrollRange(),0)
+            assert(options.height>=options.child.height)
+            assert(options.points[1][5]>=0)
+            assert(options.points[1][5]+options.height<speechScroll.points[1][5]-speechScroll.height)
+            assert(s.r.regions[2].height<=size[2]/scale*.38+.01)
+            s.view.Hide()
+        end
+    end
+end)
+
+test("muitas opções conservam viewport na barra e indicação própria até o fim da lista",function()
+    for _,size in ipairs({{1920,1080},{3440,1440},{5120,1440}}) do
+        local s=conversationScene(80); s.r.parent:SetSize(size[1],size[2]); s.source.text=string.rep(s.source.text,80)
+        local root=s.open(); s.view.Complete(); root.scripts.OnUpdate(root,1)
+        local speechScroll,options=s.r.frames[2],s.r.frames[4]
+        local hint
+        for _,region in ipairs(s.r.regions) do if region.text==s.n.Text.cinemaOptionsMore then hint=region end end
+        assert(hint); assert(options:GetVerticalScrollRange()>0); assert(speechScroll:GetVerticalScrollRange()>0)
+        assert(options.points[1][5]+options.height<s.r.regions[2].height)
+        assert(hint.points[1][5]+hint.height<=options.points[1][5])
+        options.scripts.OnMouseWheel(options,-10000)
+        equal(options:GetVerticalScroll(),options:GetVerticalScrollRange())
+        equal(hint.text,s.n.Text.cinemaOptionsPrevious); equal(speechScroll:GetVerticalScroll(),0)
+        s.view.Hide()
+    end
+end)
+
+test("objetivos conservam contagem embutida uma vez e campos separados quando necessária",function()
+    local n=core()
+    for _,text in ipairs({"0/8 Vela Grande","Vela Grande: 0/8","Vela Grande: 0 / 8","|cffffffff0/8|r Vela Grande"}) do
+        local objective={text=text,fulfilled=0,required=8}; local before=t.serialize(objective)
+        local caption,count=n.QuestPresentation.Objective(objective)
+        equal(caption,text); equal(count,""); equal(t.serialize(objective),before)
+    end
+    local caption,count=n.QuestPresentation.Objective({text="Vela Grande",fulfilled=0,required=8})
+    equal(caption,"Vela Grande"); equal(count,"0/8")
+    caption,count=n.QuestPresentation.Objective({text="Acenda 8 velas",required=8})
+    equal(caption,"Acenda 8 velas"); equal(count,"")
+end)
+
+test("renderer não duplica fração de objetivo nem reduz largura sem contagem lateral",function()
+    local s=scene("PROGRESS")
+    s.source.objectives={{index=1,text="0/8 Vela Grande",fulfilled=0,required=8}}
+    s.c.Refresh(); equal(s.reports,0); assert(s.text("0/8 Vela Grande")); equal(s.text("0/8"),nil)
+    local width=s.text("0/8 Vela Grande").width
+    s.source.objectives[1].text="Vela Grande"; s.c.Handle("QUEST_LOG_UPDATE")
+    assert(s.text("0/8")); assert(s.text("Vela Grande").width<width); s.c.Close()
+end)
+
+test("folha cresce com conteúdo e limita altura com rodapé fixo nos três momentos",function()
+    local fields={OFFER="description",PROGRESS="progressText",COMPLETE="rewardText"}
+    for _,moment in ipairs({"OFFER","PROGRESS","COMPLETE"}) do
+        for _,size in ipairs({{1920,1080},{3440,1440},{5120,1440}}) do
+            for _,scale in ipairs({.64,.8,1,1.25}) do
+                local s=scene(moment); s.r.parent:SetSize(size[1]/scale,size[2]/scale)
+                s.source.objectives={}; s.source.requiredItems={}; s.source.rewards={choices={},fixed={}}
+                s.source.quest.objectiveText=nil; s.source.quest[fields[moment]]="Você chegou."
+                s.c.Refresh(); equal(s.reports,0)
+                local action=s.button(moment=="OFFER" and "Aceitar" or moment=="PROGRESS" and "Continuar" or "Concluir")
+                local footer,paper=action.parent,action.parent.parent
+                local unit=size[2]/scale/720; local shortHeight=paper.height
+                assert(shortHeight>=360*unit and shortHeight<size[2]/scale*.82)
+                equal(footer.points[1][2],paper); equal(footer.points[1][3],"BOTTOMLEFT")
+                s.source.quest[fields[moment]]=string.rep("Uma história extensa de Elwynn para ler. ",180)
+                s.c.Handle("QUEST_ITEM_UPDATE"); equal(s.reports,0)
+                equal(paper.height,size[2]/scale*.82)
+                assert(paper.height>shortHeight)
+                local scrolling
+                for _,frame in ipairs(s.r.frames) do if frame.parent==paper and frame.kind=="ScrollFrame" then scrolling=frame end end
+                assert(scrolling:GetVerticalScrollRange()>0)
+                equal(scrolling.height+140*unit,paper.height)
+                equal(footer.height,87*unit); s.c.Close()
+            end
+        end
+    end
+end)
+
+test("reflow da altura conserva prefixo da fala e tempo da abertura sem piscar",function()
+    local s=scene("PROGRESS"); s.c.Refresh(); local root=s.root(); root.scripts.OnUpdate(root,.22)
+    local action=s.button("Continuar"); local paper=action.parent.parent
+    local before=paper.parent.height/paper.height; local alpha=root.alpha
+    local first=s.text("Ainda sinto o"); assert(first)
+    s.source.requiredItems[2]={index=2,name="Outra página",itemID=600,quantity=8}
+    s.c.Handle("QUEST_ITEM_UPDATE"); equal(s.reports,0)
+    assert(math.abs(paper.parent.height/paper.height-before)<.000001)
+    equal(first.text,"Ainda sinto o"); equal(root.alpha,alpha); s.c.Close()
+end)
+
+test("dica oferece só ações disponíveis para conversa oferta progresso e recompensa",function()
+    local n=core()
+    for _,moment in ipairs({"OFFER","PROGRESS","COMPLETE"}) do
+        local view=build(n,source(moment))
+        for _,typing in ipairs({false,true}) do
+            local hint=n.Conversation.Hint(view,typing)
+            equal(hint:find("Espaço",1,true)~=nil,typing)
+            equal(hint:find("recompensa",1,true)~=nil,moment=="COMPLETE")
+            assert(hint:find("Esc",1,true))
+        end
+    end
+    local view=build(n,source("COMPLETE")); for _,entry in ipairs(view.entries) do entry.enabled=false end
+    equal(n.Conversation.Hint(view,false),n.Text.cinemaHintExit)
+    local talk=assert(n.Conversation.Build({moment="GOSSIP",text="Olá"}))
+    equal(n.Conversation.Hint(talk,false),n.Text.cinemaHintExit)
+    talk.entries={{enabled=true}}; assert(n.Conversation.Hint(talk,false):find("escolher opção",1,true))
+end)
+
+test("dica se atualiza ao completar fala por espaço ou pelo tempo",function()
+    for _,manual in ipairs({false,true}) do
+        local s=scene("OFFER"); s.c.Refresh()
+        local hint=s.text(s.n.Conversation.Hint(build(s.n,s.source),true)); assert(hint)
+        if manual then s.root().scripts.OnKeyDown(s.root(),"SPACE")
+        else s.root().scripts.OnUpdate(s.root(),10) end
+        equal(hint.text,s.n.Text.cinemaHintExit); s.c.Close()
+    end
+end)
+
+test("cartão exigido expõe quantidade e posse com fonte segura e sem alterar fotografia",function()
+    local s=scene("PROGRESS"); local before=t.serialize(s.source)
+    s.source.requiredItems[1].quantity=8; before=t.serialize(s.source)
+    s.r.env.C_Item={GetItemCount=function(id) equal(id,503); return 0 end}
+    s.c.Refresh(); equal(s.reports,0); assert(s.text("Em posse: 0/8")); equal(t.serialize(s.source),before)
+    s.r.env.C_Item.GetItemCount=function() return 9 end
+    s.c.Handle("QUEST_LOG_UPDATE"); assert(s.text("Em posse: 9/8")); equal(t.serialize(s.source),before)
+    local name=s.text("Tomo chamuscado"); local count=s.text("Em posse: 9/8")
+    assert(name.parent.height>=name.height+count.height+16); s.c.Close()
+end)
+
+test("quantidade exigida não inventa posse quando ausente restrita ou API falha",function()
+    for _,mode in ipairs({"missing","secret","error","fractional"}) do
+        local s=scene("PROGRESS"); local secret={}
+        s.r.env.issecretvalue=function(value) return value==secret end
+        if mode~="missing" then
+            s.r.env.C_Item={GetItemCount=function()
+                if mode=="error" then error("contagem indisponível") end
+                return mode=="secret" and secret or .5
+            end}
+        end
+        s.c.Refresh(); equal(s.reports,0); assert(s.text("Exigidos: 3")); equal(s.text("Em posse: 0/3"),nil); s.c.Close()
+    end
+    local n=core()
+    equal(n.QuestPresentation.ItemCount({quantity=1},true),"Exigidos: 1")
+    equal(n.QuestPresentation.ItemCount({},true),"")
+    equal(n.QuestPresentation.ItemCount({quantity=8,owned=0},false),"")
+end)
+
+local function titleLines(name,title)
+    return {{type=2,leftText=name},{type=0,leftText=title},{type=47,leftText="Nível 30"},{type=0,leftText="Ventobravo"}}
+end
+local function titleProbe(c)
+    for _,entry in ipairs(c.diagnostics().entries) do if entry.code=="npc_title_probe" then return entry end end
+end
+test("título simples tolera tipos ausentes e separadores antes do nível sem adivinhar linha dois",function()
+    for _,name in ipairs({"Estalajadeiro Fábio","Ferreiro Argus"}) do
+        local c=t.client(); c.start(); c.npc.name=name
+        local title=name=="Ferreiro Argus" and "Treinamento de Ferraria" or "Hospedagem"
+        c.unitTooltip={guid=c.npc.guid,lines={{type=1,leftText=""},{type=2,leftText=name},{leftText=title},
+            {type=1,leftText=""},{type=47,leftText="Nível 30"}}}
+        c.fire("GOSSIP_SHOW"); equal(c.namespace.GossipDialogs.GetCurrent().npc.title,title)
+        assert(titleProbe(c).message:find("accepted_plain",1,true))
+        c.fire("QUEST_DETAIL"); equal(c.namespace.QuestDialogs.GetCurrent().npc.title,title)
+    end
+end)
+
+test("tooltip de token resolvido só é usado quando GUID é idêntico ao NPC",function()
+    for _,mode in ipairs({"other","same","secret_token","secret_guid"}) do
+        local matches=mode=="same"
+        local c=t.client(); c.start(); c.npc.name="Ferreiro Argus"
+        local old=c.env.UnitGUID; local calls=0
+        c.env.UnitTokenFromGUID=function(guid) equal(guid,c.npc.guid); return mode=="secret_token" and c.secret or "mouseover" end
+        c.env.UnitGUID=function(unit)
+            if unit=="mouseover" then return mode=="secret_guid" and c.secret or matches and c.npc.guid or "Creature-0-1-0-0-999-000" end
+            return old(unit)
+        end
+        c.env.C_TooltipInfo.GetUnit=function(unit)
+            if unit=="npc" then return nil end
+            equal(unit,"mouseover"); calls=calls+1; return {guid=c.npc.guid,lines=titleLines(c.npc.name,"Treinamento de Ferraria")}
+        end
+        c.fire("GOSSIP_SHOW"); equal(c.namespace.GossipDialogs.GetCurrent().npc.title,matches and "Treinamento de Ferraria" or nil)
+        equal(calls,matches and 1 or 0)
+        local trace=titleProbe(c).message; assert(trace:find("data_unavailable",1,true))
+        assert(not trace:find(c.npc.guid,1,true))
+    end
+end)
+
+test("tooltip nativo já aberto fornece título por GUID sem ser alterado",function()
+    for _,mode in ipairs({"other","same","secret"}) do
+        local matches=mode=="same"
+        local c=t.client(); c.start(); c.npc.name="Estalajadeiro Fábio"
+        c.env.C_TooltipInfo.GetUnit=function() return nil end
+        c.env.GameTooltip.GetPrimaryTooltipData=function() return {guid=mode=="secret" and c.secret or matches and c.npc.guid or "outra criatura",
+            lines=titleLines(c.npc.name,"Hospedagem")} end
+        local before=t.serialize(c.tooltip)
+        c.fire("GOSSIP_SHOW"); equal(c.namespace.GossipDialogs.GetCurrent().npc.title,matches and "Hospedagem" or nil)
+        equal(t.serialize(c.tooltip),before)
+    end
+end)
+
+test("diagnóstico do título preserva linhas brutas e motivo uma vez por NPC sem tocar diário",function()
+    local c=t.client(); c.start(); c.npc.name="Ferreiro Argus"
+    c.unitTooltip={lines=titleLines(c.npc.name,"Treinamento de Ferraria")}
+    c.fire("GOSSIP_SHOW"); local sequence=c.saved().nextSequence
+    c.fire("GOSSIP_SHOW"); c.fire("GOSSIP_SHOW"); equal(c.saved().nextSequence,sequence)
+    local count=0
+    for _,entry in ipairs(c.diagnostics().entries) do if entry.code=="npc_title_probe" then count=count+1; equal(entry.count,1) end end
+    equal(count,1)
+    local probe=titleProbe(c)
+    equal(probe.context.stage,"npc_title"); equal(probe.context.creatureID,777)
+    assert(probe.message:find('2: type=0 left="Treinamento de Ferraria"',1,true))
+    assert(probe.message:find("decision=accepted_plain",1,true)); equal(probe.stack,nil)
+    c.npc.guid="Creature-0-1-0-0-778-000"; c.fire("GOSSIP_SHOW")
+    count=0; for _,entry in ipairs(c.diagnostics().entries) do if entry.code=="npc_title_probe" then count=count+1 end end
+    equal(count,2)
+end)
+
+test("título rejeita tipo identidade facção e secretos inclusive em dados aninhados",function()
+    for _,mode in ipairs({"guid","data","lines","line","text","type","faction","level","race","args","missing_name","missing_header"}) do
+        local c=t.client(); c.start(); c.npc.name="Ferreiro Argus"
+        local data={guid=c.npc.guid,lines=titleLines(c.npc.name,"Treinamento de Ferraria")}
+        local secret=c.secret
+        if mode=="guid" then data.guid=secret
+        elseif mode=="data" then data=secret
+        elseif mode=="lines" then data.lines=secret
+        elseif mode=="line" then data.lines[2]=secret
+        elseif mode=="text" then data.lines[2].leftText=secret
+        elseif mode=="type" then data.lines[2].type=secret
+        elseif mode=="faction" then data.lines[2].leftText="Alliance"
+        elseif mode=="level" then data.lines[2]={type=47,leftText="<Nível 30>"}
+        elseif mode=="race" then data.lines[2]={type=48,leftText="Humanoide"}
+        elseif mode=="args" then data.lines[2]={type=0,args=secret}
+        elseif mode=="missing_name" then c.npc.name=nil; data.lines[1].leftText=nil
+        elseif mode=="missing_header" then data.lines[1].leftText=nil end
+        c.unitTooltip=data; c.fire("GOSSIP_SHOW")
+        equal(c.namespace.GossipDialogs.GetCurrent().npc.title,nil)
+        local probe=titleProbe(c); assert(probe)
+        if mode~="faction" and mode~="level" and mode~="race" and mode~="missing_name" and mode~="missing_header" then
+            equal(probe.redacted,true)
+        end
+        assert(not probe.message:find("não gravar",1,true)); assert(probe.message:find("decision=",1,true))
+    end
+end)
+
+test("coleta de título tem limite por sessão e dado extenso é truncado explicitamente",function()
+    local c=t.client(); c.start(); c.npc.name="Ferreiro Argus"
+    c.unitTooltip={lines=titleLines(c.npc.name,string.rep("História ",900))}
+    c.fire("GOSSIP_SHOW"); local probe=titleProbe(c)
+    equal(probe.messageTruncated,true); assert(#probe.message<=2048)
+    assert(probe.message:find("npc: accepted_plain",1,true))
+    for index=1,140 do
+        c.npc.guid="Creature-0-1-0-0-"..(2000+index).."-000"
+        c.unitTooltip={lines=titleLines(c.npc.name,"Treinamento de Ferraria")}
+        c.namespace.DialogueAPI.ReadNPC(c.namespace.DialogueAPI.Reader())
+    end
+    local latest=c.diagnostics().entries[#c.diagnostics().entries]
+    equal(latest.context.creatureID,2127); equal(#c.diagnostics().entries,50)
+end)
+
+return {scene=scene,source=source,conversationScene=conversationScene}

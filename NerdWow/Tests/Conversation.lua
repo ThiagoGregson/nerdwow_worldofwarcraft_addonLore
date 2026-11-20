@@ -1172,7 +1172,7 @@ test("zona subzona e dica ocupam caixas centradas e faixas sem conflito inclusiv
             if region.kind=="FontString" and region.alpha~=0 then
                 if region.text=="Floresta do Canto Eterno" then zoneLabel=region end
                 if region.text=="Corredor dos Arquivistas" then subLabel=region end
-                if region.text==n.Text.cinemaHint then hintLabel=region end
+                if region.text==n.Conversation.Hint(assert(n.Conversation.Build(model())),false) then hintLabel=region end
                 if region.text and region.text~="" and region.shown then assert(region:GetWidth()>0 and region:GetHeight()>0) end
             end
         end

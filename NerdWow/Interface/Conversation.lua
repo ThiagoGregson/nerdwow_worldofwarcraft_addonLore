@@ -62,14 +62,33 @@ function Conversation.Layout(width,height,lineWidth)
 end
 function Conversation.Arrange(layout,header,speech,options)
     local s=layout.scale
-    local optionHeight=math.min(options,layout.maximumBottom*.36)
-    local fixed=18*s+header+8*s+14*s+12*s+optionHeight+18*s
+    -- Give measured options priority over extra speech lines. Both viewports
+    -- stay inside the bar; only lists that exceed the remaining space scroll.
+    local minimumSpeech=math.min(speech,layout.speechSize*1.6)
+    local capacity=math.max(1,layout.maximumBottom-(18*s+header+8*s+14*s+12*s+18*s+minimumSpeech))
+    local optionHint=options>capacity and 14*s or 0
+    local optionHeight=math.min(options,math.max(1,capacity-optionHint))
+    local optionBottom=18*s+optionHint
+    local fixed=18*s+header+8*s+14*s+12*s+optionHeight+optionBottom
     local bottom=math.min(layout.maximumBottom,math.max(layout.bottom,fixed+speech))
     local speechTop=bottom-18*s-header-8*s
-    local speechBottom=18*s+optionHeight+12*s+14*s
+    local speechBottom=optionBottom+optionHeight+12*s+14*s
     return {bottom=bottom,headerTop=bottom-18*s,speechTop=speechTop,
         speechHeight=math.max(1,speechTop-speechBottom),speechBottom=speechBottom,
-        optionHeight=math.max(1,optionHeight),optionBottom=18*s}
+        optionHeight=math.max(1,optionHeight),optionBottom=optionBottom,optionHint=optionHint>0}
+end
+function Conversation.Hint(view,typing)
+    local parts={}
+    if typing then parts[#parts+1]=addon.Text.cinemaHintSpeech end
+    for index,entry in ipairs(view.entries or {}) do
+        if index>9 then break end
+        if entry.enabled then
+            parts[#parts+1]=view.kind=="quest" and addon.Text.cinemaHintReward or addon.Text.cinemaHintOption
+            break
+        end
+    end
+    parts[#parts+1]=addon.Text.cinemaHintExit
+    return table.concat(parts,"  ·  ")
 end
 function Conversation.Paragraphs(text)
     local result,position={},1

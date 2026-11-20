@@ -5,6 +5,11 @@ local function entry(code)
         timestamp=1795101185,version="0.6.2",context={gameEvent="GOSSIP_SHOW",moment="GOSSIP",creatureID=197,stage="show"}}
 end
 local function recent(c) return c.diagnostics().entries[#c.diagnostics().entries] end
+local function failureCount(c)
+    local count=0
+    for _,entry in ipairs(c.diagnostics().entries) do if entry.code~="npc_title_probe" then count=count+1 end end
+    return count
+end
 
 test("diagnóstico tem raiz própria cópias públicas e compatibilidade sem apagar dados inválidos",function()
     local n=core(); local d,root=n.Diagnostics.Open(nil)
@@ -57,7 +62,7 @@ test("barreira preserva mensagem textual e stack antes de desenrolar a pilha",fu
     c.namespace.DiagnosticAPI.Record("interface","interface_error",fault,{gameEvent="GOSSIP_SHOW",stage="show"},
         {moment="GOSSIP",npc={creatureID=197}})
     local saved=recent(c)
-    equal(saved.message,fault.message); equal(saved.stack,fault.stack); equal(saved.version,"0.7.0")
+    equal(saved.message,fault.message); equal(saved.stack,fault.stack); equal(saved.version,"0.7.1")
     equal(saved.context.gameEvent,"GOSSIP_SHOW"); equal(saved.context.moment,"GOSSIP"); equal(saved.context.creatureID,197)
     equal(saved.timestamp,c.time)
 end)
@@ -158,9 +163,9 @@ end)
 
 test("deduplicações normais do diário não geram falha de diagnóstico",function()
     local c=client(); c.start(); c.fire("ZONE_CHANGED"); c.fire("GOSSIP_SHOW"); c.fire("GOSSIP_SHOW")
-    equal(#c.diagnostics().entries,0)
+    equal(failureCount(c),0)
     c.namespace.DiagnosticAPI.Record("capture","duplicate_quest",{message="não registrar"})
-    equal(#c.diagnostics().entries,0)
+    equal(failureCount(c),0)
 end)
 
 test("validadores identificam caminhos de missão gossip e envelope sem alterar esquema",function()
@@ -187,9 +192,9 @@ test("fala da Major sem opções e textos vazios opcionais continuam capturávei
     c.fire("GOSSIP_SHOW")
     local event=c.saved().events[#c.saved().events]
     equal(event.type,"GOSSIP_VIEWED"); equal(event.payload.npc.creatureID,197)
-    equal(#c.diagnostics().entries,0)
+    equal(failureCount(c),0)
     c.quest.description=""; c.quest.objectiveText=""; c.fire("QUEST_DETAIL")
-    equal(c.saved().events[#c.saved().events].type,"QUEST_OFFERED"); equal(#c.diagnostics().entries,0)
+    equal(c.saved().events[#c.saved().events].type,"QUEST_OFFERED"); equal(failureCount(c),0)
 end)
 
 test("novos campos ausentes são silenciosos mas valores presentes inválidos avisam",function()
@@ -230,7 +235,8 @@ test("diagnóstico persiste cada falha de interface mesmo com aviso já emitido"
     equal(first.context.creatureID,777)
     c.command("dialogo"); c.command("dialogo"); c.flush()
     assert(#c.diagnostics().entries>=1)
-    local total=0; for _, record in ipairs(c.diagnostics().entries) do total=total+record.count end
+    local total=0
+    for _,record in ipairs(c.diagnostics().entries) do if record.code~="npc_title_probe" then total=total+record.count end end
     equal(total,2)
     local warnings=0
     for _, message in ipairs(c.messages) do
@@ -284,7 +290,7 @@ test("comando fontes cobre dezoito combinações e persiste resultados sem mudar
         local flags=call.flags==nil and "nil" or '"'..call.flags..'"'
         local key=call.path..":"..flags; assert(not combinations[key]); combinations[key]=true; paths[call.path]=true
         local entry=c.diagnostics().entries[index-4]
-        equal(entry.code,"font_test"); equal(entry.category,"interface"); equal(entry.version,"0.7.0")
+        equal(entry.code,"font_test"); equal(entry.category,"interface"); equal(entry.version,"0.7.1")
         equal(entry.context.gameEvent,"COMMAND_FONTES"); equal(entry.context.stage,"font_probe")
         assert(entry.message:find("font="..call.path.."; flags="..flags.."; size=21; success=true; phase=immediate",1,true))
         assert(entry.message:find("; applied=true",1,true))

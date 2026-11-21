@@ -451,4 +451,99 @@ test("hover não habilita em breve e seleção sublinhada conserva destaque",fun
     end
     s.n.ConfigurationUI.Close()
 end)
+test("Personagem e Sobre abrem com EB Garamond em EditBox estrita em proporções e escalas",function()
+    for _,size in ipairs({{1920,1080},{3440,1440},{5120,1440},{6400/3,1200}}) do
+        for _,scale in ipairs({.64,.8,1,1.25}) do
+            local s=scene(); s.r.parent:SetSize(size[1]/scale,size[2]/scale)
+            local before=t.serialize(s.root); s.open()
+            for _,chapter in ipairs({"Personagem","Sobre","Personagem","Sobre"}) do
+                s.select(chapter); equal(s.n.ConfigurationUI.IsOpen(),true)
+                local ids=chapter=="Personagem" and {"name","title"} or {"github"}
+                for _,id in ipairs(ids) do
+                    local edit=assert(s.control(id,"EditBox"))
+                    assert(edit.font:find("EBGaramond-Regular.ttf",1,true)); equal(edit.flags,"")
+                    equal(edit.enabled,chapter=="Sobre"); equal(edit.size,16*math.min(size[1]/scale/1280,size[2]/scale/720))
+                    assert(edit:GetText()~=""); assert(visible(edit))
+                end
+                assert(not s.region(s.n.Text.configLoading))
+            end
+            equal(#s.records,0); equal(t.serialize(s.root),before); s.n.ConfigurationUI.Close()
+        end
+    end
+end)
+
+test("GitHub recebe foco seleção e Ctrl C nativo sem aceitar edição nem fechar livro",function()
+    local s=scene(); s.open(); s.select("Sobre")
+    local edit=assert(s.control("github","EditBox")); local expected=edit:GetText(); local root=s.frame()
+    equal(edit.enabled,true); edit:SetFocus(); equal(edit:HasFocus(),true); equal(edit.highlighted,true)
+    root.scripts.OnKeyDown(root,"C"); equal(root.propagate,true); equal(s.r.focus,edit)
+    equal(edit:GetText(),expected); assert(expected:find("https://github.com/ThiagoGregson/",1,true))
+    edit:SetText("edição indevida"); edit.scripts.OnTextChanged(edit,true); equal(edit:GetText(),expected)
+    equal(edit.highlighted,true); equal(s.n.ConfigurationUI.IsOpen(),true)
+    s.select("Personagem")
+    for _,id in ipairs({"name","title"}) do
+        local future=s.control(id,"EditBox"); equal(future.enabled,false); equal(future.parent.spec.soon,true)
+        future.scripts.OnTextChanged(future,true); equal(s.root[id],nil)
+    end
+    equal(#s.records,0); s.n.ConfigurationUI.Close()
+end)
+
+test("recusa de fonte embutida em EditBox usa Arial com flags válidas e capítulo aberto",function()
+    local s=scene()
+    s.r.rejectFont=function(path,_,_,object)
+        return object.kind=="EditBox" and path:find("NerdWow\\Fonts\\",1,true)~=nil
+    end
+    s.open(); s.select("Personagem"); s.select("Sobre")
+    local edit=s.control("github","EditBox")
+    equal(edit.font,"Fonts\\ARIALN.TTF"); equal(edit.flags,""); equal(edit.enabled,true)
+    equal(s.n.ConfigurationUI.IsOpen(),true); equal(#s.records,1); equal(s.records[1].code,"font_fallback")
+    for _,call in ipairs(s.r.fontCalls) do equal(call.flags,"") end
+    s.n.ConfigurationUI.Close()
+end)
+
+test("ambas fontes recusadas ou com erro conservam capítulos por objeto nativo e recuperam",function()
+    for _,mode in ipairs({"false","error"}) do
+        local s=scene(true); s.n.FontAPI.Preload(); s.r.advance(.2)
+        local rejected=true
+        s.r.rejectFont=function(_,_,_,object)
+            if rejected and object.kind=="EditBox" then
+                if mode=="error" then error("editbox_font_original") end
+                return true
+            end
+        end
+        s.open(); s.select("Personagem")
+        for _,id in ipairs({"name","title"}) do
+            local future=assert(s.control(id,"EditBox")); equal(future.fontObject,s.r.env.GameFontNormal)
+            equal(future.enabled,false); assert(future.text~="")
+        end
+        s.select("Sobre"); local edit=assert(s.control("github","EditBox"))
+        equal(edit.fontObject,s.r.env.GameFontNormal); equal(edit.enabled,true); edit:SetFocus(); equal(edit.highlighted,true)
+        equal(#s.records,1); equal(s.records[1].code,"font_fallback_failed")
+        assert(s.records[1].message:find("recovered=true",1,true))
+        if mode=="error" then assert(s.records[1].message:find("editbox_font_original",1,true)); assert(s.records[1].stack) end
+        equal(s.n.ConfigurationUI.IsOpen(),true); assert(not s.region(s.n.Text.configLoading))
+        local text=edit:GetText(); rejected=false; s.r.advance(1.1)
+        assert(edit.font:find("EBGaramond-Regular.ttf",1,true)); equal(edit:GetText(),text); equal(edit:HasFocus(),true)
+        s.select("Personagem"); assert(s.control("name","EditBox").font:find("EBGaramond-Regular.ttf",1,true))
+        s.n.ConfigurationUI.Close(); s.open(); s.select("Sobre"); equal(s.n.ConfigurationUI.IsOpen(),true)
+        equal(#s.records,1); s.r.drain(); equal(#s.r.timers,0)
+    end
+end)
+test("SetFont false em EditBox com identidade EB Garamond confirmada não usa fallback",function()
+    local s=scene(true); s.n.FontAPI.Preload(); s.r.advance(.2)
+    s.r.fontBehavior=function(path,_,flags,object)
+        if object.kind=="EditBox" and path:find("NerdWow\\Fonts\\",1,true) then
+            equal(flags,""); return {delay=.3,identityNow=true,factor=1}
+        end
+    end
+    s.open(); s.select("Personagem")
+    for _,id in ipairs({"name","title"}) do
+        local field=assert(s.control(id,"EditBox")); assert(field.font:find("EBGaramond-Regular.ttf",1,true))
+        equal(field.enabled,false); equal(field.fontObject,nil)
+    end
+    s.select("Sobre"); local field=assert(s.control("github","EditBox"))
+    assert(field.font:find("EBGaramond-Regular.ttf",1,true)); equal(field.enabled,true)
+    s.r.drain(); equal(#s.records,0); equal(s.n.ConfigurationUI.IsOpen(),true)
+    s.n.ConfigurationUI.Close()
+end)
 return {scene=scene,visible=visible}

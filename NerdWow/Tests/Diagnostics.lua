@@ -62,7 +62,7 @@ test("barreira preserva mensagem textual e stack antes de desenrolar a pilha",fu
     c.namespace.DiagnosticAPI.Record("interface","interface_error",fault,{gameEvent="GOSSIP_SHOW",stage="show"},
         {moment="GOSSIP",npc={creatureID=197}})
     local saved=recent(c)
-    equal(saved.message,fault.message); equal(saved.stack,fault.stack); equal(saved.version,"0.8.1")
+    equal(saved.message,fault.message); equal(saved.stack,fault.stack); equal(saved.version,"0.8.2")
     equal(saved.context.gameEvent,"GOSSIP_SHOW"); equal(saved.context.moment,"GOSSIP"); equal(saved.context.creatureID,197)
     equal(saved.timestamp,c.time)
 end)
@@ -281,6 +281,7 @@ test("comando fontes cobre dezoito combinações e persiste resultados sem mudar
     local c=client(); c.start()
     local journal,settings=t.serialize(c.saved()),t.serialize(c.settings())
     c.command(" FONTES ")
+    assert(c.messages[1]:find('nil é normalizado para ""',1,true))
     equal(#c.messages,7); equal(#c.fontCalls,22); equal(#c.diagnostics().entries,18)
     equal(#c.fontFrames,1); equal(c.fontFrames[1].alpha,0); equal(c.fontFrames[1].mouse,false)
     local paths,combinations={},{}
@@ -288,11 +289,15 @@ test("comando fontes cobre dezoito combinações e persiste resultados sem mudar
         if index>4 then
         equal(call.size,21)
         local flags=call.flags==nil and "nil" or '"'..call.flags..'"'
-        local key=call.path..":"..flags; assert(not combinations[key]); combinations[key]=true; paths[call.path]=true
+        local slot=(index-5)%3
+        local key=call.path..":"..slot; assert(not combinations[key]); combinations[key]=true; paths[call.path]=true
         local entry=c.diagnostics().entries[index-4]
-        equal(entry.code,"font_test"); equal(entry.category,"interface"); equal(entry.version,"0.8.1")
+        equal(entry.code,"font_test"); equal(entry.category,"interface"); equal(entry.version,"0.8.2")
         equal(entry.context.gameEvent,"COMMAND_FONTES"); equal(entry.context.stage,"font_probe")
-        assert(entry.message:find("font="..call.path.."; flags="..flags.."; size=21; success=true; phase=immediate",1,true))
+        equal(call.flags,slot==2 and "OUTLINE" or "")
+        assert(entry.message:find("font="..call.path.."; flags="..flags.."; size=21; success=true",1,true))
+        equal(entry.message:find("requestedFlags=nil",1,true)~=nil,slot==0)
+        assert(entry.message:find("; phase=immediate",1,true))
         assert(entry.message:find("; applied=true",1,true))
         end
     end
@@ -322,8 +327,8 @@ test("teste de fontes distingue flags recusadas e exceções sem aplicar fallbac
             exceptions=exceptions+1; assert(entry.stack); assert(entry.message:find("success=false",1,true))
         else assert(entry.message:find("success=true",1,true)) end
     end
-    equal(rejected,6); equal(exceptions,1)
-    assert(c.messages[3]:find('nil=OK | ""=false (verificando) | OUTLINE=erro',1,true))
+    equal(rejected,12); equal(exceptions,1)
+    assert(c.messages[3]:find('nil=false (verificando) | ""=false (verificando) | OUTLINE=erro',1,true))
 end)
 
 test("teste repete chamadas reais reutiliza probe oculto e respeita retenção existente",function()
@@ -368,6 +373,9 @@ test("fontes registra false imediato e identidade aplicada depois em dezoito pro
     equal(#c.diagnostics().entries,36); equal(#c.messages,14)
     for index=19,36 do
         local record=c.diagnostics().entries[index]
+        local slot=(index-19)%3
+        assert(record.message:find('flags="'..(slot==2 and "OUTLINE" or "")..'"',1,true))
+        equal(record.message:find("requestedFlags=nil",1,true)~=nil,slot==0)
         equal(record.code,"font_test_loaded"); equal(record.context.stage,"font_probe_loaded")
         assert(record.message:find("; ready=true",1,true)); assert(record.message:find("; applied=true",1,true))
         assert(record.message:find("; width=",1,true)); assert(record.message:find("; height=",1,true))

@@ -15,7 +15,7 @@ addon.Text = {
     configIndexFoot="As mudanças valem na hora. Use /nerdwow config ou o botão direito do minimapa para abrir este livro.",
     configResetText="Restaurar as opções deste livro? O diário e a posição do botão do minimapa serão preservados.",
     configCredits="Fontes Cinzel, de Natanael Gama, e EB Garamond, de Georg Duffner e Octavio Pardo (SIL Open Font License).\n\nInspirado na experiência do DialogueUI, de Peterodox. Nenhum código ou arte dele foi usado.",
-    fontsHeader = "Fontes — imediato: retorno de SetFont (false aguarda verificação). Estado após cerca de 5 s; detalhes no diagnóstico, retenção 50.",
+    fontsHeader = "Fontes — imediato: retorno de SetFont (false aguarda verificação). nil é normalizado para \"\". Estado após cerca de 5 s; detalhes no diagnóstico, retenção 50.",
     fontsLoadedHeader = "Fontes — após verificação: GetFont e métricas; grave o diagnóstico com /reload ou logout.",
     fontsLine = "%s (%g): nil=%s | \"\"=%s | OUTLINE=%s",
     fontsSuccess = "OK",

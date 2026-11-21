@@ -425,7 +425,7 @@ test("novos nomes pt-BR aparecem no status e dica continua contando inserções"
     c.env.C_GossipInfo.SelectOption(7001); c.command()
     assert(c.messages[#c.messages-1]:find("opção de conversa escolhida", 1, true))
     local tooltip = t.tooltipText(c)
-    assert(tooltip:find("NerdWow v0.8.1", 1, true)); assert(tooltip:find("Eventos no diário: 4", 1, true))
+    assert(tooltip:find("NerdWow v0.8.2", 1, true)); assert(tooltip:find("Eventos no diário: 4", 1, true))
     assert(tooltip:find("aguardando gravação: 4", 1, true))
     equal(c.registered.CHAT_MSG_MONSTER_SAY, nil); equal(c.registered.CHAT_MSG_MONSTER_YELL, nil)
 end)

@@ -20,7 +20,9 @@ end
 local function normalized(path) return type(path)=="string" and path:gsub("/","\\"):lower() or "" end
 local function positive(value) return type(value)=="number" and value>0 and value<math.huge end
 local function setFont(object,path,size,flags)
-    local ok,value=addon.DiagnosticAPI.Try(function() return restricted(object:SetFont(path,size,flags))==true end)
+    -- EditBox requires a string even though FontString accepts absent flags.
+    -- Keep this normalization at the only SetFont boundary, including probes.
+    local ok,value=addon.DiagnosticAPI.Try(function() return restricted(object:SetFont(path,size,flags or ""))==true end)
     if not ok then return false,value end
     return value
 end
@@ -43,8 +45,8 @@ local function snapshot(job)
     return value
 end
 local function result(path,flags,size,success)
-    return string.format("font=%s; flags=%s; size=%g; success=%s",path,
-        flags==nil and "nil" or '"'..flags..'"',size,tostring(success))
+    return string.format("font=%s; flags=\"%s\"; size=%g; success=%s%s",path,
+        flags or "",size,tostring(success),flags==nil and "; requestedFlags=nil" or "")
 end
 local function observation(value)
     return string.format("; actual=%s; actualSize=%s; actualFlags=%s; applied=%s; width=%s; height=%s",
@@ -110,19 +112,33 @@ end
 local function fallback(object,file,size,job,reason)
     local success,fault=setFont(object,file.fallback,size,nil)
     local native,readFault=snapshot({object=object,path=file.fallback,size=size})
+    local final,objectFault,objectSuccess
+    if not native.applied then
+        -- SetFontObject does not depend on this widget accepting SetFont.
+        -- Inherit the Blizzard object; never mutate the shared global font.
+        objectSuccess,objectFault=addon.DiagnosticAPI.Try(function() object:SetFontObject(GameFontNormal) end)
+        final,readFault=snapshot({object=object,path=file.fallback,size=size})
+        if not (type(final.path)=="string" and final.path~="" and positive(final.size)) then final=nil end
+    end
     if not reported[file.name] then
         reported[file.name]=true
         local message=result(file.path,nil,size,job.success).."; fallback="..file.fallback
             .."; fallbackSuccess="..tostring(success)..observation(job.value).."; fallbackApplied="..tostring(native.applied)
             .."; reason="..(reason or "unconfirmed")
+        if objectSuccess~=nil then
+            message=message.."; fontObject=GameFontNormal; fontObjectSuccess="..tostring(objectSuccess)
+                .."; recovered="..tostring(final~=nil)
+            if final then message=message.."; finalFont="..final.path.."; finalSize="..tostring(final.size) end
+        end
         addon.DiagnosticAPI.Record("interface",native.applied and "font_fallback" or "font_fallback_failed",
-            detail(message,job.readFault or job.fault or readFault or fault),{stage="font_apply"})
+            detail(message,job.readFault or job.fault or readFault or fault or objectFault),{stage="font_apply"})
     end
-    if not native.applied then
-        if readFault or job.readFault then addon.DiagnosticAPI.Raise(readFault or job.readFault,"font_unavailable") end
+    if not native.applied and not final then
+        local failure=readFault or job.readFault or objectFault
+        if failure then addon.DiagnosticAPI.Raise(failure,"font_unavailable") end
         error("font_unavailable")
     end
-    return file.fallback
+    return final and final.path or file.fallback
 end
 local RETRIES={1,2,4,8}
 local function later(state,callback)

@@ -624,7 +624,7 @@ test("metadados e carregamento real do TOC", function()
     equal(metadata.Interface, "120105")
     equal(metadata.Title, "NerdWow")
     equal(metadata.Author, "Greg")
-    equal(metadata.Version, "0.8.1")
+    equal(metadata.Version, "0.8.2")
     equal(metadata.SavedVariables, "NerdWow_Journal, NerdWow_Settings, NerdWow_Diagnostics")
     equal(#order, 40)
     for _, path in ipairs(order) do assert(not path:find("Tests/", 1, true)) end
@@ -661,7 +661,7 @@ test("entrada, status pt-BR e ajuda", function()
     equal(events[2].type, "LOCATION_CHANGED")
     equal(events[2].timestamp, TIME)
     c.command()
-    assert(c.messages[1]:find("v0.8.1 | esquema 1 | 2 eventos", 1, true))
+    assert(c.messages[1]:find("v0.8.2 | esquema 1 | 2 eventos", 1, true))
     assert(c.messages[1]:find("mudança de local", 1, true))
     assert(c.messages[1]:find("UTC", 1, true))
     assert(c.messages[2]:find("/reload", 1, true))
@@ -1179,7 +1179,7 @@ test("dica mostra versão, totais, pendentes, UTC e instruções em pt-BR", func
     local c = client()
     c.start()
     local text = tooltipText(c)
-    for _, expected in ipairs({ "NerdWow v0.8.1", "Eventos no diário: 2",
+    for _, expected in ipairs({ "NerdWow v0.8.2", "Eventos no diário: 2",
         "Novos desta sessão aguardando gravação: 2", "Último evento:", "UTC",
         "Clique esquerdo: sincronizar", "Arraste com o botão esquerdo" }) do
         assert(text:find(expected, 1, true), expected)

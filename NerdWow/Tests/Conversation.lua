@@ -477,8 +477,11 @@ local function renderer(n,asynchronous)
             assert((kind=="FontString" or kind=="EditBox") and type(path)=="string" and path~="")
             assert(type(size)=="number" and size>0 and size<math.huge)
             assert(flags==nil or flags=="" or flags=="OUTLINE","flags não simuladas")
-            state.fontCalls[#state.fontCalls+1]={path=path,size=size,flags=flags}
-            if state.badFont or (state.rejectFont and state.rejectFont(path,size,flags)) then return false end
+            if kind=="EditBox" and flags==nil then
+                error("bad argument #3 to 'SetFont' (Usage: local success = self:SetFont(fontFile, height, flags))")
+            end
+            state.fontCalls[#state.fontCalls+1]={path=path,size=size,flags=flags,region=self}
+            if state.badFont or (state.rejectFont and state.rejectFont(path,size,flags,self)) then return false end
             self.fontRequest=(self.fontRequest or 0)+1
             local token=self.fontRequest
             local response=state.fontBehavior and state.fontBehavior(path,size,flags,self)
@@ -496,7 +499,12 @@ local function renderer(n,asynchronous)
             if state.getFont then return state.getFont(self) end
             return self.font,self.size,self.flags or ""
         end
-        function f:SetFontObject() self.font,self.size,self.flags="Fonts\\FRIZQT__.TTF",12,"" end
+        function f:SetFontObject(object)
+            assert(object==state.env.GameFontNormal,"objeto nativo esperado")
+            if state.fontObjectError then error("native_font_object_error") end
+            self.fontRequest=(self.fontRequest or 0)+1
+            self.fontObject=object; self.font,self.size,self.flags="Fonts\\FRIZQT__.TTF",12,""; self.metricFactor=1
+        end
         function f:SetText(value)
             if self.kind=="FontString" and not self.font then error("FontString:SetText(): Font not set") end
             self.text=value
@@ -552,7 +560,7 @@ local function renderer(n,asynchronous)
     local parent=make("UIParent"); parent:SetSize(1280,720)
     state.parent=parent
     local env={type=type,pairs=pairs,ipairs=ipairs,math=math,string=string,tonumber=tonumber,tostring=tostring,
-        pcall=pcall,error=error,assert=assert,UIParent=parent,xpcall=xpcall,unpack=unpack,select=select,setmetatable=setmetatable,table=table,
+        pcall=pcall,error=error,assert=assert,UIParent=parent,GameFontNormal={},xpcall=xpcall,unpack=unpack,select=select,setmetatable=setmetatable,table=table,
         debugstack=function() return debug.traceback("stack",2) end,
         CreateColor=function(...) local color={...}; color.kind="Color"; return color end,
         CreateFrame=function(kind,_,frameParent)
@@ -696,15 +704,16 @@ test("não aplicação persistente usa alternativa só depois da janela de verif
     r.drain(); equal(#r.timers,0)
 end)
 
-test("recusa embutida e nativa após espera continua falha explícita sem fonte inventada",function()
+test("recusa embutida e nativa após espera usa objeto nativo com diagnóstico explícito",function()
     local n=core(); local r=renderer(n,true); local records={}; r.badFont=true
     n.DiagnosticAPI.Bind(function(value) records[#records+1]=value end)
     local object=r.parent:CreateFontString(nil,"OVERLAY","GameFontNormal")
     equal(select(2,n.FontAPI.Apply(object,"Cinzel-Bold",21)),false)
     r.drain()
-    local ok,err=pcall(n.FontAPI.Apply,object,"Cinzel-Bold",21)
-    equal(ok,false); assert(err:find("font_unavailable",1,true))
+    local path,ready=n.FontAPI.Apply(object,"Cinzel-Bold",21)
+    equal(ready,true); equal(path,object:GetFont()); equal(object.fontObject,r.env.GameFontNormal)
     equal(#records,1); equal(records[1].code,"font_fallback_failed")
+    assert(records[1].message:find("recovered=true",1,true))
 end)
 
 test("fechar ou trocar conversa invalida notificação de fonte pendente",function()
@@ -810,7 +819,8 @@ test("identidade compara caminho normalizado tamanho e flags em vez de confiar e
     object=r.parent:CreateFontString(nil,"OVERLAY","GameFontNormal")
     path,ready=n.FontAPI.Apply(object,"Cinzel-Regular",21)
     equal(ready,false); equal(path,nil)
-    r.drain(); equal(pcall(n.FontAPI.Apply,object,"Cinzel-Regular",21),false)
+    r.drain(); path,ready=n.FontAPI.Apply(object,"Cinzel-Regular",21)
+    equal(ready,true); equal(path,"Fonts\\FRIZQT__.TTF") -- native object has a usable final font.
 end)
 
 test("renderizador real limita teclado animação e fala ao ciclo da conversa",function()
@@ -1019,7 +1029,7 @@ test("pós-hook nativo só agenda sem executar transação dentro do handler Bli
     callback(); equal(#s.queued,0) -- geração antiga não reaplica a interface.
 end)
 
-test("layout aplica fontes sem contorno com flags nil e não faz aquecimento automático",function()
+test("layout aplica fontes sem contorno com flags vazias e não faz aquecimento automático",function()
     local n=core(); local r=renderer(n)
     equal(#r.fontCalls,0)
     local view=n.ConversationView.New({Error=function() error("view failure") end})
@@ -1030,7 +1040,7 @@ test("layout aplica fontes sem contorno com flags nil e não faz aquecimento aut
         if call.path=="Interface\\AddOns\\NerdWow\\Fonts\\Cinzel-Bold.ttf" and call.size==21 then found=true end
     end
     assert(found)
-    for _, call in ipairs(r.fontCalls) do equal(call.flags,nil); assert(call.size>=8) end
+    for _, call in ipairs(r.fontCalls) do equal(call.flags,""); assert(call.size>=8) end
 end)
 
 test("recusa só de Cinzel Bold troca o nome pela fonte nativa e preserva as demais",function()
@@ -1045,7 +1055,8 @@ test("recusa só de Cinzel Bold troca o nome pela fonte nativa e preserva as dem
         if region.text=="Guardiã dos registros" then assert(region.font:find("EBGaramond-Italic.ttf",1,true)) end
     end
     assert(found); equal(#records,1); equal(records[1].code,"font_fallback")
-    assert(records[1].message:find("success=false; fallback=Fonts\\FRIZQT__.TTF; fallbackSuccess=true",1,true))
+    assert(records[1].message:find("success=false",1,true))
+    assert(records[1].message:find("fallback=Fonts\\FRIZQT__.TTF; fallbackSuccess=true",1,true))
 end)
 
 test("recusa de todos os TTF embutidos mantém cinema teclado fala e seleção com fontes nativas",function()
@@ -1094,7 +1105,7 @@ test("exceção na fonte embutida usa alternativa e conserva a causa e a pilha",
     assert(records[1].message:find("font_asset_error",1,true)); assert(records[1].stack)
 end)
 
-test("fallback mantém altura proporcional e mínimo de oito com flags nil",function()
+test("fallback mantém altura proporcional e mínimo de oito com flags vazias",function()
     local n=core(); local r=renderer(n)
     r.rejectFont=function(path) return path:find("NerdWow\\Fonts\\",1,true)~=nil end
     local object=r.parent:CreateFontString(nil,"OVERLAY","GameFontNormal")
@@ -1102,7 +1113,7 @@ test("fallback mantém altura proporcional e mínimo de oito com flags nil",func
         n.FontAPI.Apply(object,"EBGaramond-Regular",size)
         equal(object.font,"Fonts\\ARIALN.TTF"); equal(object.size,math.max(8,size))
         local native=r.fontCalls[#r.fontCalls]
-        equal(native.size,math.max(8,size)); equal(native.flags,nil)
+        equal(native.size,math.max(8,size)); equal(native.flags,"")
     end
     equal(#r.fontCalls,4); equal(r.fontCalls[1].size,21)
 end)
@@ -1314,18 +1325,19 @@ test("parágrafos têm intervalo menor que linha vazia sem mudar modelo ou anima
     equal(source.text,original); equal(view.IsTyping(),false)
 end)
 
-test("fonte que não carrega aciona fallback antes de suprimir apresentação nativa",function()
+test("SetFont recusado em todas as fontes conserva cinema pelo objeto nativo",function()
     local n=core(); local p=platform(n); local r=renderer(n); r.badFont=true
     local reports=0; local records={}
     n.DiagnosticAPI.Bind(function(entry) records[#records+1]=entry end)
     local c=n.ConversationController.New({GetModel=model,IsEnabled=function() return true end,
         View=n.ConversationView,Platform=p.api,Report=function() reports=reports+1 end})
-    c.Refresh(); equal(reports,1); equal(p.root.alpha,.75)
-    equal(r.frames[1].shown,false); equal(r.frames[1].keyboard,false)
-    equal(r.frames[1].scripts.OnUpdate,nil)
-    equal(#records,1)
+    c.Refresh(); equal(reports,0); equal(p.root.alpha,0)
+    equal(r.frames[1].shown,true); equal(r.frames[1].keyboard,true)
+    assert(r.frames[1].scripts.OnUpdate)
+    equal(#records,4)
     for _,record in ipairs(records) do equal(record.code,"font_fallback_failed") end
     assert(records[1].message:find("fallbackSuccess=false",1,true))
+    assert(records[1].message:find("recovered=true",1,true)); c.Close()
 end)
 
 test("erro de animação é contido e restaura interface sem deixar teclado ativo",function()
@@ -1432,5 +1444,38 @@ test("sonda sem confirmação retenta automaticamente mantendo fallback até con
     blocked=false; r.drain()
     assert(changes>0); assert(n.FontAPI.Apply(object,"Cinzel-Regular",26):find("Cinzel-Regular.ttf",1,true))
     equal(n.FontAPI.Prepare("Cinzel-Regular",48),true); equal(#r.timers,0)
+end)
+test("EditBox recusa nil mas FontAPI fornece flags vazias nos widgets reais simulados",function()
+    local n=core(); local r=renderer(n,true)
+    local edit=r.env.CreateFrame("EditBox",nil,r.parent)
+    local ok,err=pcall(edit.SetFont,edit,"Fonts\\ARIALN.TTF",26.6666667,nil)
+    equal(ok,false); assert(err:find("bad argument #3",1,true))
+    local label=r.parent:CreateFontString(nil,"OVERLAY","GameFontNormal")
+    equal(label:SetFont("Fonts\\ARIALN.TTF",16,nil),true)
+    n.FontAPI.Preload(); r.advance(.2)
+    for _,object in ipairs({edit,label}) do
+        local path,ready=n.FontAPI.Apply(object,"EBGaramond-Regular",26.6666667)
+        equal(ready,true); equal(path,object:GetFont()); equal(object.flags,"")
+        assert(path:find("EBGaramond-Regular.ttf",1,true)); equal(object.size,26.6666667)
+    end
+    r.drain(); equal(#r.timers,0)
+end)
+
+test("objeto nativo de emergência não altera global e falha de API sem fonte continua explícita",function()
+    local n=core(); local r=renderer(n,true); local records={}
+    n.DiagnosticAPI.Bind(function(record) records[#records+1]=record end)
+    n.FontAPI.Preload(); r.advance(.2)
+    local edit=r.env.CreateFrame("EditBox",nil,r.parent)
+    r.rejectFont=function(_,_,_,object) return object==edit end
+    local path,ready=n.FontAPI.Apply(edit,"EBGaramond-Regular",16)
+    equal(ready,true); equal(path,"Fonts\\FRIZQT__.TTF"); equal(edit.fontObject,r.env.GameFontNormal)
+    equal(next(r.env.GameFontNormal),nil); equal(#records,1)
+    assert(records[1].message:find("fontObjectSuccess=true; recovered=true",1,true))
+    -- A broken native object API and no current font are a different failure.
+    r.fontObjectError=true
+    edit=r.env.CreateFrame("EditBox",nil,r.parent)
+    local ok,fault=n.DiagnosticAPI.Try(n.FontAPI.Apply,edit,"EBGaramond-Regular",16)
+    equal(ok,false); assert(fault.message:find("native_font_object_error",1,true)); assert(fault.stack)
+    r.drain()
 end)
 return {renderer=renderer,platform=platform,wire=wire}

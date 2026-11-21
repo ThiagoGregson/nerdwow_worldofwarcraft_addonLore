@@ -293,6 +293,9 @@ local function arrange()
     if value.message=="font_pending" then return false,"font_pending" end
     addon.DiagnosticAPI.Raise(value,"interface_error")
 end
+local function paperAnimating()
+    return questPaper and model and model.kind=="quest" and questPaper.IsAnimating() or false
+end
 local function update(_,delta)
     if questPaper and model.kind=="quest" then questPaper.Advance(delta) end
     if entrance<.9 then
@@ -304,7 +307,7 @@ local function update(_,delta)
     end
     local text,changed=speech.Advance(delta)
     if changed then reveal(text); keyHint() end
-    if entrance==.9 and speech.IsComplete() then root:SetScript("OnUpdate",nil) end
+    if entrance==.9 and speech.IsComplete() and not paperAnimating() then root:SetScript("OnUpdate",nil) end
 end
 function View.New(newCallbacks)
     callbacks=newCallbacks
@@ -365,7 +368,7 @@ function View.New(newCallbacks)
             local ready,code=arrange()
             if ready==false and code~="font_pending" then error("layout_unavailable") end
             root:EnableKeyboard(true)
-            if entrance<.9 or not speech.IsComplete() then root:SetScript("OnUpdate",safe(update)) end
+            if entrance<.9 or not speech.IsComplete() or paperAnimating() then root:SetScript("OnUpdate",safe(update)) end
         end
     end,"OnShow"))
     root:SetScript("OnHide",safe(function() root:SetScript("OnUpdate",nil); root:EnableKeyboard(false) end,"OnHide"))
@@ -471,7 +474,7 @@ function View.New(newCallbacks)
         local ready,code=arrange()
         refreshPending=ready==false and code=="font_pending"
         if ready==false and code~="font_pending" then error("layout_unavailable") end
-        if (not speech.IsComplete() or entrance<.9) and not root:GetScript("OnUpdate") then
+        if (not speech.IsComplete() or entrance<.9 or paperAnimating()) and not root:GetScript("OnUpdate") then
             root:SetScript("OnUpdate",safe(update,"OnUpdate"))
         end
         return ready,code

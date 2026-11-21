@@ -38,6 +38,7 @@ end
 function View.New(parent,options)
     local q,labels,items,actions,markers,coins={},{},{},{},{},{}
     local model,layout,elapsed,selected,active=nil,nil,0,nil,false
+    local contentHeight=1
     local labelIndex,itemIndex=0,0
     local root=CreateFrame("Frame",nil,parent); root:Hide(); root:EnableMouse(false)
     local clip=CreateFrame("ScrollFrame",nil,root)
@@ -201,10 +202,11 @@ function View.New(parent,options)
         end
         return y
     end
-    local function updateActions(format)
+    local function updateActions()
         if not model then return end
         local s=layout.scale
         local specs=addon.QuestPresentation.Actions(model,selected)
+        local buttonHeight=35*s
         for index,spec in ipairs(specs) do
             local b=actions[index]
             if not b then
@@ -212,7 +214,8 @@ function View.New(parent,options)
                 b.fill=solid(b,"9e2a35"); b.fill:SetAllPoints()
                 b.light=solid(b,"ffffff",.13,"ARTWORK"); b.light:SetPoint("TOPLEFT",b,"TOPLEFT",1,-1)
                 b.light:SetPoint("TOPRIGHT",b,"TOPRIGHT",-1,-1); b.light:SetHeight(1)
-                b.label=makeLabel(b); b.label:SetAllPoints(); b.label:SetJustifyH("CENTER"); b.label:SetJustifyV("MIDDLE")
+                b.label=makeLabel(b); b.label:SetPoint("CENTER",b,"CENTER",0,0)
+                b.label:SetJustifyH("CENTER"); b.label:SetJustifyV("MIDDLE")
                 b:SetScript("OnEnter",options.Safe(function() if b.allowed then b:SetAlpha(.86) end end))
                 b:SetScript("OnLeave",options.Safe(function() b:SetAlpha(b.allowed and 1 or .4) end))
                 actions[index]=b
@@ -220,9 +223,10 @@ function View.New(parent,options)
             local r,g,blue=rgb(SEAL[model.theme.key])
             b.fill:SetColorTexture(r,g,blue,spec.ghost and .09 or 1)
             b:Show(); b:SetSize(math.min(210*s,(layout.paperWidth-78*s-12*s)/#specs),35*s)
-            b:ClearAllPoints(); b:SetPoint("BOTTOMLEFT",footer,"BOTTOMLEFT",39*s+(index-1)*(b:GetWidth()+12*s),29*s)
-            if format then font(b.label,"Cinzel-Bold",14*s,spec.ghost and "352416" or "f7ecd4") end
-            b.label:SetWordWrap(false); b.label:SetText(spec.text)
+            font(b.label,"Cinzel-Bold",14*s,spec.ghost and "352416" or "f7ecd4")
+            b.label:SetWordWrap(true)
+            local height=options.Height(b.label,spec.text,"Cinzel-Bold",14*s,b:GetWidth()-8*s)
+            b.label:SetShadowOffset(0,0); buttonHeight=math.max(buttonHeight,height+8*s)
             b.allowed=spec.enabled; b:SetEnabled(spec.enabled); b:SetAlpha(spec.enabled and 1 or .4)
             local token=options.Callbacks()
             b:SetScript("OnClick",options.Safe(function() if b.allowed then token.Action(spec.key) end end,"quest_action"))
@@ -238,7 +242,23 @@ function View.New(parent,options)
             b.edges[3]:SetPoint("TOPLEFT",b,"TOPLEFT",0,0); b.edges[3]:SetSize(1*s,h)
             b.edges[4]:SetPoint("TOPRIGHT",b,"TOPRIGHT",0,0); b.edges[4]:SetSize(1*s,h)
         end
-        note:SetText(addon.QuestPresentation.Note(model))
+        local width=layout.paperWidth-78*s
+        local noteText=addon.QuestPresentation.Note(model)
+        font(note,"EBGaramond-Italic",11*s,"786148"); note:SetWordWrap(true)
+        local noteHeight=16*s
+        if noteText~="" then
+            noteHeight=math.max(noteHeight,options.Height(note,noteText,"EBGaramond-Italic",11*s,width-19*s))
+            note:SetShadowOffset(0,0)
+        else note:SetText(""); note:SetSize(width-19*s,noteHeight) end
+        local buttonBottom=math.max(29*s,9*s+noteHeight+4*s)
+        for index,b in ipairs(actions) do
+            if index<=#specs then
+                b:SetHeight(buttonHeight); b.label:SetHeight(buttonHeight-8*s)
+                b:ClearAllPoints(); b:SetPoint("BOTTOMLEFT",footer,"BOTTOMLEFT",
+                    39*s+(index-1)*(b:GetWidth()+12*s),buttonBottom)
+            end
+        end
+        footer:SetHeight(math.max(87*s,buttonBottom+buttonHeight+23*s))
         book:SetAlpha(note:GetText()~="" and .65 or 0)
     end
     local function opening()
@@ -251,6 +271,18 @@ function View.New(parent,options)
         for _,object in ipairs({sealOuter,sealInner,sealRim,sealCenter,sealCrest}) do object:SetAlpha(sealAlpha) end
         root:SetAlpha(math.min(1,elapsed/.16))
         return elapsed<.82
+    end
+    local function resize()
+        local s=layout.scale
+        local reserved=29*s+24*s+footer:GetHeight()
+        layout.paperHeight=addon.QuestPresentation.PaperHeight(layout,contentHeight,reserved)
+        root:SetHeight(layout.paperHeight); paper:SetHeight(layout.paperHeight)
+        shadeLeft:SetHeight(layout.paperHeight); shadeRight:SetHeight(layout.paperHeight)
+        scroll:SetHeight(math.max(1,layout.paperHeight-reserved)); track:SetHeight(scroll:GetHeight())
+        child:SetHeight(contentHeight); scroll:UpdateScrollChildRect()
+        scroll:SetVerticalScroll(math.min(scroll:GetVerticalScroll(),scroll:GetVerticalScrollRange()))
+        more:ClearAllPoints(); more:SetPoint("BOTTOMLEFT",paper,"BOTTOMLEFT",39*s,footer:GetHeight()+s)
+        scrollHint(); opening()
     end
     q.Prepare=prepare
     function q.Place(input,newLayout)
@@ -420,15 +452,9 @@ function View.New(parent,options)
         end
         for index=labelIndex+1,#labels do labels[index]:Hide() end
         for index=itemIndex+1,#items do items[index]:Hide() end
-        local contentHeight=math.max(1,y+12*s)
+        contentHeight=math.max(1,y+12*s)
         -- Measure in the final fonts at the final width before choosing height.
         -- All resizing happens in this layout pass, without replaying opening.
-        layout.paperHeight=addon.QuestPresentation.PaperHeight(layout,contentHeight)
-        root:SetHeight(layout.paperHeight); paper:SetHeight(layout.paperHeight)
-        shadeLeft:SetHeight(layout.paperHeight); shadeRight:SetHeight(layout.paperHeight)
-        scroll:SetHeight(layout.paperHeight-140*s); track:SetHeight(scroll:GetHeight())
-        child:SetHeight(contentHeight); scroll:UpdateScrollChildRect()
-        scroll:SetVerticalScroll(math.min(scroll:GetVerticalScroll(),scroll:GetVerticalScrollRange()))
         font(more,"EBGaramond-Italic",11*s,"786148")
         more:ClearAllPoints(); more:SetPoint("BOTTOMLEFT",paper,"BOTTOMLEFT",39*s,88*s); more:SetSize(width,16*s)
         more:SetWordWrap(false)
@@ -436,10 +462,10 @@ function View.New(parent,options)
         note:ClearAllPoints(); note:SetPoint("BOTTOMLEFT",footer,"BOTTOMLEFT",58*s,9*s); note:SetSize(width-19*s,16*s)
         note:SetWordWrap(false)
         book:ClearAllPoints(); book:SetPoint("BOTTOMLEFT",footer,"BOTTOMLEFT",39*s,9*s); book:SetSize(13*s,13*s)
-        updateActions(true); scrollHint(); opening()
+        updateActions(); resize()
     end
-    function q.Selection(value) selected=value; model.selected=value; updateActions() end
-    function q.Recorded(kind) if model then model.recorded=kind; updateActions() end end
+    function q.Selection(value) selected=value; model.selected=value; updateActions(); resize() end
+    function q.Recorded(kind) if model then model.recorded=kind; updateActions(); resize() end end
     function q.Start() elapsed=0; scroll:SetVerticalScroll(0) end
     function q.Advance(delta)
         if not active then return false end

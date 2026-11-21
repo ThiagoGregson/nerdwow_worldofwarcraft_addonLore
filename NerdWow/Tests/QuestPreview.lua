@@ -120,6 +120,21 @@ for _,moment in ipairs({"OFFER","PROGRESS","COMPLETE"}) do
     html[#html+1]='<h2>'..moment..'</h2>'..draw(s)
 end
 -- Advance widths from the bundled Cinzel Bold hmtx; the rest remains approximate.
+for _,moment in ipairs({"PROGRESS","COMPLETE"}) do
+    local s=fixtures.scene(moment)
+    s.source.quest.title="PROCURA-SE: Tiago Ciríaco"
+    s.r.glyphWidths={[s.source.quest.title]=17} -- reproduce the client's two-line title.
+    s.source.npc={name="Delegado Pedrosa",faction="Alliance"}
+    s.source.location={zone="Floresta de Elwynn",subZone="Madeireira Vale do Leste",mapID=37}
+    s.source.quest.progressText="Veio receber a recompensa?"; s.source.quest.rewardText="Justiça foi feita!"
+    s.source.requiredItems={{index=1,itemID=57122,name="Cabeça de Tiago Ciríaco",icon=134166,quality=1,quantity=1}}
+    s.source.objectives={{index=1,kind="item",text="1/1 Cabeça de Tiago Ciríaco",fulfilled=1,required=1,finished=true}}
+    s.source.rewards={choices={},fixed={},experience=554}; s.completable=true
+    s.r.env.C_Item={GetItemCount=function() return 0 end}
+    s.c.Refresh(); s.c.Complete()
+    for _=1,120 do local update=s.root().scripts.OnUpdate; if update then update(s.root(),1/120) end end
+    html[#html+1]='<h2>Tiago Ciríaco · '..moment..'</h2>'..draw(s)
+end
 for _,sample in ipairs({{"M",.953},{"W",.971},{"Á",.717}}) do
     local s=fixtures.scene("OFFER")
     s.r.glyphWidths={[sample[1]]=sample[2]}

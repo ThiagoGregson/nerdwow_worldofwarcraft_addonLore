@@ -458,8 +458,8 @@ test("folha cresce com conteúdo e limita altura com rodapé fixo nos três mome
                 local scrolling
                 for _,frame in ipairs(s.r.frames) do if frame.parent==paper and frame.kind=="ScrollFrame" then scrolling=frame end end
                 assert(scrolling:GetVerticalScrollRange()>0)
-                equal(scrolling.height+140*unit,paper.height)
-                equal(footer.height,87*unit); s.c.Close()
+                assert(math.abs(scrolling.height+53*unit+footer.height-paper.height)<.00001)
+                assert(footer.height>=87*unit); s.c.Close()
             end
         end
     end
@@ -902,5 +902,159 @@ test("recuperação de fonte na missão conserva fala seleção e animação",fu
     assert(s.text(s.source.quest.title).font:find("Cinzel-Bold.ttf",1,true))
     equal(s.p.env.QuestFrame.alpha,0); equal(s.reports,0); equal(#s.calls,0)
     s.c.Close(); s.r.drain()
+end)
+local function finishFrames(s)
+    local root=s.root()
+    for _=1,240 do
+        local update=root.scripts.OnUpdate
+        if not update then return end
+        update(root,1/120)
+    end
+    error("animação não encerrou em dois segundos")
+end
+local function checkFooter(s,moment)
+    local t=s.n.Text
+    local captions=moment=="OFFER" and {t.questAccept,t.questDecline}
+        or moment=="PROGRESS" and {t.questContinue,t.questLater} or {t.questFinish}
+    local primary=assert(s.button(captions[1])); local footer=primary.parent; local paper=footer.parent
+    local clip=paper.parent; local unit=s.r.parent:GetHeight()/720
+    assert(math.abs(clip.height-paper.height)<.00001,"papel ainda recortado pelo desenrolar")
+    for _,caption in ipairs(captions) do
+        local b=assert(s.button(caption)); equal(b.shown,true)
+        local bottom=b.points[1][5]
+        assert(bottom>=0 and bottom+b.height<=footer.height,"botão fora do rodapé")
+        assert(clip.height>=paper.height-bottom,"botão recortado pelo clip")
+        assert(b.label.height>=b.label:GetStringHeight(),"rótulo do botão truncado")
+    end
+    local scrolling
+    for _,frame in ipairs(s.r.frames) do if frame.parent==paper and frame.kind=="ScrollFrame" then scrolling=frame end end
+    assert(scrolling); assert(scrolling.height>0)
+    assert(29*unit+scrolling.height+24*unit<=paper.height-footer.height+.00001)
+    assert(paper.height<=s.r.parent:GetHeight()*.82+.00001)
+    return paper,footer,scrolling,primary
+end
+
+test("transição retida completa desenrolar com fala curta vazia ou completada por Espaço",function()
+    for _,moment in ipairs({"OFFER","PROGRESS","COMPLETE"}) do
+        for _,speech in ipairs({"", "Justiça foi feita!", "espaço"}) do
+            local s=scene(moment); local quest=s.source
+            s.source={moment="GOSSIP",text="Salve, cidadã.",npc=quest.npc,location=quest.location}
+            s.c.Refresh(); finishFrames(s) -- entrance=.9 survives the next hold.
+            s.source=quest; quest.quest.title="PROCURA-SE: Tiago Ciríaco"
+            local field=moment=="OFFER" and "description" or moment=="PROGRESS" and "progressText" or "rewardText"
+            quest.quest[field]=speech=="espaço" and "Uma fala longa que o jogador completa imediatamente." or speech
+            quest.rewards={choices={},fixed={},experience=554}; s.completable=true
+            s.c.Refresh()
+            if speech=="espaço" then s.c.Key("SPACE"); equal(#s.calls,0) end
+            local root=s.root()
+            for _=1,48 do if root.scripts.OnUpdate then root.scripts.OnUpdate(root,1/120) end end
+            assert(root.scripts.OnUpdate,"fala curta encerrou a animação do papel")
+            finishFrames(s); equal(root.scripts.OnUpdate,nil); equal(s.reports,0)
+            local _,_,_,button=checkFooter(s,moment)
+            button.scripts.OnClick(button); equal(#s.calls,1); s.c.Close()
+        end
+    end
+end)
+
+test("títulos de uma duas e três linhas respeitam altura real nos três momentos e escalas",function()
+    local titles={"Uma vigília", "PROCURA-SE: Tiago Ciríaco em Elwynn",
+        "PROCURA-SE: Tiago Ciríaco, o procurado da Madeireira Vale do Leste"}
+    for _,moment in ipairs({"OFFER","PROGRESS","COMPLETE"}) do
+        for _,size in ipairs({{1920,1080},{3440,1440},{5120,1440}}) do
+            for _,scale in ipairs({.64,.8,1,1.25}) do
+                local lastHeight=0
+                for lines,title in ipairs(titles) do
+                    local s=scene(moment); s.r.parent:SetSize(size[1]/scale,size[2]/scale)
+                    s.source.quest.title=title; s.source.npc={name="Delegado Pedrosa"}
+                    s.source.objectives={}; s.source.requiredItems={}; s.source.rewards={choices={},fixed={},experience=554}
+                    s.source.quest.description="Você chegou."; s.source.quest.progressText="Veio receber a recompensa?"
+                    s.source.quest.rewardText="Justiça foi feita!"; s.source.quest.objectiveText=nil
+                    s.c.Refresh(); s.c.Complete(); finishFrames(s)
+                    local region=assert(s.text(title)); local unit=size[2]/scale/720
+                    assert(region.height>lastHeight); lastHeight=region.height
+                    local measuredLines=(region:GetStringHeight()+region.spacing)/(region.size*1.4+region.spacing)
+                    assert(math.abs(measuredLines-lines)<.00001)
+                    local paper=checkFooter(s,moment)
+                    assert(region.height>=region:GetStringHeight()); assert(paper.height>=360*unit)
+                    equal(s.reports,0); s.c.Close()
+                end
+            end
+        end
+    end
+end)
+
+test("NPC tipo recompensas e nota multilinha preservam rodapé e só conteúdo rola",function()
+    for _,moment in ipairs({"OFFER","PROGRESS","COMPLETE"}) do
+        local s=scene(moment)
+        s.source.quest.title=string.rep("Uma longa incumbência de Elwynn ",5)
+        s.source.npc.name=string.rep("Delegado das estradas da floresta ",5)
+        s.source.npc.title=string.rep("Guardião dos caminhos ",5)
+        s.r.env.C_QuestInfoSystem={GetQuestClassification=function() return 1 end}
+        s.r.env.Enum={QuestClassification={Normal=1}}
+        s.n.Text.questClasses.Normal=string.rep("Missão importante ",8)
+        s.source.quest.description=string.rep("A estrada ainda guarda muitas histórias. ",100)
+        s.source.quest.progressText=s.source.quest.description; s.source.quest.rewardText=s.source.quest.description
+        for _,list in ipairs({s.source.rewards.choices,s.source.rewards.fixed,s.source.requiredItems}) do
+            for _,item in ipairs(list) do item.name=string.rep("Memórias da Madeireira Vale do Leste ",10) end
+        end
+        s.n.Text.questWillRecord=string.rep("O diário registrará este momento. ",6)
+        s.c.Refresh(); s.c.Complete(); finishFrames(s)
+        local paper,footer,scrolling=checkFooter(s,moment)
+        equal(paper.height,720*.82); assert(scrolling:GetVerticalScrollRange()>0)
+        local height=footer.height; local ratio=paper.parent.height/paper.height
+        s.n.Text.questRecorded.QUEST_COMPLETED=string.rep("Uma memória registrada no diário. ",9)
+        s.c.Recorded("QUEST_COMPLETED",101)
+        if moment=="COMPLETE" then
+            assert(footer.height>height); checkFooter(s,moment)
+            equal(paper.parent.height/paper.height,ratio)
+        end
+        scrolling.scripts.OnMouseWheel(scrolling,-99999)
+        equal(scrolling.scroll,scrolling:GetVerticalScrollRange()); assert(s.text(s.n.Text.cinemaPrevious))
+        checkFooter(s,moment); equal(s.reports,0); s.c.Close()
+    end
+end)
+
+test("regra de posse usa inventário coerente sem converter objetivo em quantidade possuída",function()
+    local n=core(); local item={itemID=57122,name="Cabeça de Tiago Ciríaco",quantity=1}
+    local objectives={{kind="item",text="1/1 Cabeça de Tiago Ciríaco",fulfilled=1,required=1,finished=true}}
+    equal(n.QuestPresentation.Owned(item,objectives,0,false),nil)
+    equal(n.QuestPresentation.Owned(item,objectives,0,true),nil)
+    equal(n.QuestPresentation.Owned(item,objectives,1,true),1)
+    equal(n.QuestPresentation.Owned(item,objectives,4,true),4)
+    objectives[1].fulfilled=0; objectives[1].text="Cabeça de Tiago Ciríaco: 0/1"
+    equal(n.QuestPresentation.Owned(item,objectives,0,false),0)
+    equal(n.QuestPresentation.Owned(item,objectives,1,false),nil)
+    for _,count in ipairs({-1,.5,math.huge,0/0,"1"}) do equal(n.QuestPresentation.Owned(item,objectives,count,false),nil) end
+    objectives[1].kind="monster"; equal(n.QuestPresentation.Owned(item,objectives,1,false),1)
+    objectives[1].kind="item"; objectives[1].text="Outra Cabeça de Tiago Ciríaco: 0/1"
+    equal(n.QuestPresentation.Owned(item,objectives,1,false),1) -- no substring/position association.
+end)
+
+test("caso real57122 omite posse conflitante mas mostra inventário confiável e mantém captura intacta",function()
+    local s=scene("PROGRESS"); local item=s.source.requiredItems[1]
+    item.itemID=57122; item.name="Cabeça de Tiago Ciríaco"; item.quantity=1
+    s.source.quest.title="PROCURA-SE: Tiago Ciríaco"
+    s.source.objectives={{index=1,kind="item",text="1/1 Cabeça de Tiago Ciríaco",fulfilled=1,required=1,finished=true}}
+    local count,calls=0,0
+    s.r.env.C_Item={GetItemCount=function(id,bank,uses,reagents,account)
+        equal(id,57122); equal(bank,false); equal(uses,false); equal(reagents,false); equal(account,false)
+        calls=calls+1; return count
+    end}
+    local before=t.serialize(s.source); s.completable=true; s.c.Refresh()
+    assert(s.text("Exigidos: 1")); equal(s.text("Em posse: 0/1"),nil)
+    count=1; s.c.Update(); assert(s.text("Em posse: 1/1"))
+    count=4; s.c.Update(); assert(s.text("Em posse: 4/1"))
+    equal(t.serialize(s.source),before)
+    s.source.requiredItems[1].itemID=nil; local previous=calls; s.c.Update()
+    equal(calls,previous); assert(s.text("Exigidos: 1")); s.c.Close()
+end)
+test("rodapé mede rótulos de botão multilinha e mantém clique fora da rolagem",function()
+    local s=scene("PROGRESS"); s.completable=true
+    s.n.Text.questContinue=string.rep("Continuar a entrega da missão ",6)
+    s.n.Text.questLater=string.rep("Voltar depois para entregar ",6)
+    s.c.Refresh(); s.c.Complete(); finishFrames(s)
+    local _,footer,_,button=checkFooter(s,"PROGRESS")
+    assert(footer.height>87); assert(button.height>35)
+    button.scripts.OnClick(button); equal(#s.calls,1); equal(s.calls[1].key,"CompleteQuest"); s.c.Close()
 end)
 return {scene=scene,source=source,conversationScene=conversationScene}

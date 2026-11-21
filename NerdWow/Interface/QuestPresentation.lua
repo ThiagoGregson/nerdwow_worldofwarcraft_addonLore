@@ -56,6 +56,25 @@ function Quest.ItemCount(item,required)
     end
     return item.owned~=nil and string.format(addon.Text.questOwnedOnly,tostring(item.owned)) or ""
 end
+local function objectiveName(value)
+    if type(value)~="string" then return nil end
+    return value:gsub("|c%x%x%x%x%x%x%x%x",""):gsub("|r","")
+        :gsub("^%s*%d+%s*/%s*%d+%s*",""):gsub("%s*:?%s*%d+%s*/%s*%d+%s*$",""):match("^%s*(.-)%s*$")
+end
+function Quest.Owned(item,objectives,count,canComplete)
+    if type(count)~="number" or count<0 or count>=math.huge or count~=math.floor(count) then return nil end
+    if canComplete==true and item.quantity and count<item.quantity then return nil end
+    local name=nonblank(item.name) and objectiveName(item.name)
+    for _,objective in ipairs(objectives or {}) do
+        if objective.kind=="item" and name and name~="" and objectiveName(objective.text)==name
+            and item.quantity and item.quantity==objective.required and objective.fulfilled~=nil then
+            -- Objective progress can be capped at the requirement. It never
+            -- supplies an inventory count when the bag API disagrees.
+            if objective.fulfilled~=count and objective.fulfilled~=math.min(count,item.quantity) then return nil end
+        end
+    end
+    return count
+end
 function Quest.Build(input,state,receipt)
     local model,code=addon.QuestDialogue.Snapshot(input)
     if not model then return nil,code end
@@ -66,7 +85,9 @@ function Quest.Build(input,state,receipt)
     local required=model.moment=="PROGRESS" and model.requiredItems or {}
     for _,item in ipairs(required or {}) do
         local owned=state.requiredOwned and state.requiredOwned[item.index]
-        if owned and owned.itemID==item.itemID then item.owned=owned.count end
+        if owned and item.itemID and owned.itemID==item.itemID then
+            item.owned=Quest.Owned(item,model.objectives,owned.count,state.canComplete)
+        end
     end
     if model.moment=="COMPLETE" and (type(state.choiceCount)~="number" or state.choiceCount~=#choices) then
         return nil,"quest_state_unavailable"
@@ -126,6 +147,7 @@ function Quest.Layout(width,height,lineWidth)
     layout.paperLeft=width-width*.045-layout.paperWidth
     layout.paperTop=height*.12
     layout.paperHeight=height*.82
+    layout.paperMaximum=layout.paperHeight
     local available=layout.paperLeft-32*s
     layout.textWidth=math.min(layout.textWidth,available-110*s)
     if layout.textWidth<180*s then return nil end
@@ -133,6 +155,7 @@ function Quest.Layout(width,height,lineWidth)
     layout.contentWidth=layout.textWidth+84*s
     return layout
 end
-function Quest.PaperHeight(layout,contentHeight)
-    return math.min(layout.paperHeight,math.max(360*layout.scale,contentHeight+140*layout.scale))
+function Quest.PaperHeight(layout,contentHeight,reservedHeight)
+    return math.min(layout.paperMaximum or layout.paperHeight,
+        math.max(360*layout.scale,contentHeight+(reservedHeight or 140*layout.scale)))
 end

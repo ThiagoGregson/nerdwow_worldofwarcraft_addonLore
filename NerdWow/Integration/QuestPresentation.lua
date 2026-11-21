@@ -37,7 +37,7 @@ function Platform.ReadState(model)
             local r=addon.DialogueAPI.Reader()
             for _,item in ipairs(model.requiredItems or {}) do
                 if item.itemID then
-                    local count=r.Number(r.Call(C_Item.GetItemCount,item.itemID),0)
+                    local count=r.Number(r.Call(C_Item.GetItemCount,item.itemID,false,false,false,false),0)
                     if count~=nil then state.requiredOwned[item.index]={itemID=item.itemID,count=count} end
                 end
             end

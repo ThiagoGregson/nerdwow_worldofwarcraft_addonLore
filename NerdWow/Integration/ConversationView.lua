@@ -358,7 +358,7 @@ function View.New(newCallbacks)
     exit:SetScript("OnLeave",safe(function() if model then color(exit.label,model.theme.muted) end end))
     root:SetScript("OnKeyDown",safe(function(_,key)
         root:SetPropagateKeyboardInput(true)
-        if (shown or transitioning) and addon.ConversationPlatform.KeyAllowed() and callbacks.Key(key) then root:SetPropagateKeyboardInput(false) end
+        if (shown or transitioning) and addon.ConversationPlatform.KeyAllowed(true) and callbacks.Key(key) then root:SetPropagateKeyboardInput(false) end
     end))
     root:SetScript("OnKeyUp",safe(function() root:SetPropagateKeyboardInput(true) end))
     root:SetScript("OnSizeChanged",safe(function()

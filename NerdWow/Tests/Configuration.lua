@@ -107,16 +107,17 @@ end)
 test("catálogo contém sete capítulos e placeholders inativos sem campos de etapas futuras",function()
     local n=t.core(); local r=n.ConfigurationCatalog; local chapters=r.Chapters()
     equal(#chapters,7); equal(chapters[1].id,"general"); equal(chapters[7].id,"about")
-    for _,id in ipairs({"camera","character"}) do for _,spec in ipairs(r.Options(id)) do equal(spec.soon,true); equal(spec.field,nil) end end
+    for _,spec in ipairs(r.Options("character")) do equal(spec.soon,true); equal(spec.field,nil) end
+    for _,spec in ipairs(r.Options("camera")) do equal(spec.soon,false); assert(spec.field) end
     equal(n.Settings.Describe("windowScale"),nil); equal(n.Settings.Describe("rpName"),nil)
-    local fields=r.Fields(); equal(#fields,6)
+    local fields=r.Fields(); equal(#fields,9)
     for _,field in ipairs(fields) do assert(field~="minimapAngle" and field~="schemaVersion") end
 end)
 test("livro revalida ações em combate e nunca escreve ou executa opção em breve",function()
     local n=t.core(); local h,root=n.Settings.Open(nil); local combat,calls=false,0
     local b=n.ConfigurationBook.New({Registry=n.ConfigurationCatalog,Settings=h,CanAct=function() return not combat end,
         ReadInfo=function() return 1 end,IsVisible=function() return false end,Action=function() calls=calls+1; return true end,ConfirmReset=function() end})
-    b.Select("camera"); equal(b.Write("camera",false),nil); equal(root.camera,nil)
+    b.Select("character"); equal(b.Write("name","Nome"),nil); equal(root.rpName,nil)
     b.Select("journal"); equal(b.Snapshot().options[4].enabled,true); combat=true
     equal(b.Activate("sync"),nil); equal(calls,0); equal(b.Snapshot().options[4].enabled,false)
     combat=false; assert(b.Activate("sync")); equal(calls,1)
@@ -179,7 +180,7 @@ test("restauração visual confirma ou cancela sem tocar ângulo e controles fut
     local s=scene(); s.root.minimapAngle=76; s.settings.Set("speechSpeed",100); s.open()
     s.select("Restaurar padrões"); assert(s.region("Restaurar padrões?")); s.select("Cancelar"); equal(s.root.speechSpeed,100)
     s.select("Restaurar padrões"); s.select("Restaurar"); equal(s.root.speechSpeed,60); equal(s.root.minimapAngle,76)
-    s.select("Câmera e interface"); local camera=s.control("camera","Button"); equal(camera.enabled,false); camera.scripts.OnClick(camera); equal(s.root.camera,nil)
+    s.select("Câmera e interface"); local camera=s.control("camera","Button"); equal(camera.enabled,true); camera.scripts.OnClick(camera); equal(s.root.cameraEnabled,false)
     s.select("Personagem"); equal(s.control("name","EditBox").enabled,false)
 end)
 test("indicadores são reais e atualizam sem reabrir ou reiniciar animação e sincronizar revalida combate",function()
@@ -442,7 +443,7 @@ test("hover não habilita em breve e seleção sublinhada conserva destaque",fun
     select.scripts.OnEnter(select); equal(select.feedback.fill.fill[4],.24)
     select.scripts.OnClick(select); local choice=s.button("Neutro"); choice.scripts.OnEnter(choice)
     equal(choice.feedback.fill.fill[4],.24); choice.scripts.OnClick(choice); equal(s.root.theme,"neutral")
-    s.select("Câmera e interface")
+    s.select("Personagem")
     for _,frame in ipairs(s.r.frames) do
         if frame.parent.spec and frame.parent.spec.soon and frame.feedback and visible(frame) then
             frame.scripts.OnEnter(frame); equal(frame.enabled,false)

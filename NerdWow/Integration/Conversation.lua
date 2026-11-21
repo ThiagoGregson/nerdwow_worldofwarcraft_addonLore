@@ -19,8 +19,8 @@ function Platform.Defer(callback,delay)
     C_Timer.After(delay or 0,callback)
     return true
 end
-function Platform.CanPresent()
-    return not plain(InCombatLockdown()) and UIParent~=nil and UIParent~=false
+function Platform.CanPresent(retainedCombat)
+    return (not plain(InCombatLockdown()) or retainedCombat==true) and UIParent~=nil and UIParent~=false
 end
 function Platform.RestoreNative()
     notifications={}
@@ -61,8 +61,8 @@ function Platform.RestoreNative()
         error("native_restore_failed")
     end
 end
-function Platform.TakeNative(moment,onShow)
-    if not Platform.CanPresent() then error("combat_interface") end
+function Platform.TakeNative(moment,onShow,retainedCombat)
+    if not Platform.CanPresent(retainedCombat) then error("combat_interface") end
     local root=moment=="GOSSIP" and GossipFrame or QuestFrame
     if not root then error("native_frame_unavailable") end
     local collected,visited={},{}
@@ -122,8 +122,8 @@ local function invoke(fn,...)
     if type(fn)~="function" then error("interaction_unavailable") end
     fn(...)
 end
-function Platform.Select(entry,moment)
-    if not Platform.CanPresent() then error("combat_interface") end
+function Platform.Select(entry,moment,retainedCombat)
+    if not Platform.CanPresent(retainedCombat) then error("combat_interface") end
     if moment=="GREETING" then
         if entry.action=="AVAILABLE" then invoke(SelectAvailableQuest,entry.value)
         elseif entry.action=="ACTIVE" then invoke(SelectActiveQuest,entry.value)
@@ -141,10 +141,10 @@ function Platform.Close(moment)
     elseif moment=="GREETING" or moment=="OFFER" or moment=="PROGRESS" or moment=="COMPLETE" then invoke(CloseQuest)
     else error("invalid_interaction") end
 end
-function Platform.QuestAction(view,key,selected) return addon.QuestPlatform.Action(view,key,selected) end
-function Platform.KeyAllowed()
+function Platform.QuestAction(view,key,selected,retainedCombat) return addon.QuestPlatform.Action(view,key,selected,retainedCombat) end
+function Platform.KeyAllowed(retainedCombat)
     if addon.ConfigurationUI and addon.ConfigurationUI.IsOpen() then return false end
-    if plain(InCombatLockdown()) then return false end
+    if plain(InCombatLockdown()) and retainedCombat~=true then return false end
     if GetCurrentKeyBoardFocus and plain(GetCurrentKeyBoardFocus()) then return false end
     if plain(IsControlKeyDown()) or plain(IsAltKeyDown()) or plain(IsShiftKeyDown()) then return false end
     return true

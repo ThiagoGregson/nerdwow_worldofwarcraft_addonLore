@@ -5,6 +5,7 @@ function Controller.New(options)
     local view,current,lastModel,failed,generation,warned,pending=nil,nil,nil,false,0,false,false
     local gameEvent,extraContext,activeMoment,deadline
     local releasing=false
+    local retainedCombat=false
     local controller={}
     local attempt=options.Try or pcall
     local function diagnose(fault,stage)
@@ -22,9 +23,16 @@ function Controller.New(options)
     local function report(fault)
         if not warned then warned=true; pcall(options.Report,fault) end
     end
+    local function effect(method,...)
+        if not options.Effects then return end
+        local ok,fault=attempt(options.Effects[method],...)
+        if not ok then diagnose(fault,"cinematic_"..method) end
+    end
+    local function canPresent() return options.Platform.CanPresent(retainedCombat) end
     local function release()
         if releasing then return false end
         releasing=true; deadline=nil; generation=generation+1
+        effect("Leave",failed or gameEvent=="PLAYER_LEAVING_WORLD" or gameEvent=="CINEMATIC_START" or gameEvent=="PLAY_MOVIE")
         local ok=true
         if view then
             local hidden,fault=attempt(view.Hide)
@@ -33,6 +41,7 @@ function Controller.New(options)
         local restored,fault=attempt(options.Platform.RestoreNative)
         if not restored then failed=true; diagnose(fault,"restore"); report(fault); ok=false end
         current,lastModel,pending,activeMoment=nil,nil,false,nil
+        retainedCombat=false
         releasing=false
         return ok
     end
@@ -73,7 +82,7 @@ function Controller.New(options)
                     if not options.Platform.Defer(function()
                         if token~=generation then return end
                         guard("native_refresh",function()
-                            options.Platform.TakeNative(moment or activeMoment,callbacks(token).NativeShown)
+                            options.Platform.TakeNative(moment or activeMoment,callbacks(token).NativeShown,retainedCombat)
                             if not pending then
                                 if current and current.kind=="quest" then controller.Update() else controller.Refresh() end
                             end
@@ -94,7 +103,7 @@ function Controller.New(options)
     local function hold(moment)
         activeMoment=moment; pending=true
         view=options.View.New(callbacks(generation))
-        options.Platform.TakeNative(moment,callbacks(generation).NativeShown)
+        options.Platform.TakeNative(moment,callbacks(generation).NativeShown,retainedCombat)
         beginWait()
         if view.Transition then view.Transition() else view.Hide() end
     end
@@ -102,7 +111,7 @@ function Controller.New(options)
         retry=retry or 0; generation=generation+1
         local token=generation
         return guard("show",function()
-            if failed or not options.IsEnabled() or not options.Platform.CanPresent() then release(); return true end
+            if failed or not options.IsEnabled() or not canPresent() then release(); return true end
             local previous=current or lastModel
             local model=options.GetModel()
             if not model then release(); return true end
@@ -139,7 +148,8 @@ function Controller.New(options)
             end
             current=prepared; pending=false; deadline=nil
             if current.kind=="quest" and view.Selection then view.Selection(current.selected) end
-            options.Platform.TakeNative(prepared.moment,callbacks(token).NativeShown)
+            options.Platform.TakeNative(prepared.moment,callbacks(token).NativeShown,retainedCombat)
+            effect("Enter",prepared)
             return true
         end)
     end
@@ -147,7 +157,7 @@ function Controller.New(options)
         generation=generation+1
         local token=generation
         guard("schedule",function()
-            if failed or not options.IsEnabled() or not options.Platform.CanPresent() then release(); return end
+            if failed or not options.IsEnabled() or not canPresent() then release(); return end
             if moment and not updateQuest then hold(moment) end
             if not options.Platform.Defer(function()
                 if token==generation then
@@ -159,7 +169,7 @@ function Controller.New(options)
     function controller.Update()
         if not current or current.kind~="quest" or not view.Refresh then controller.Schedule(); return end
         guard("quest_update",function()
-            if not options.Platform.CanPresent() then release(); return end
+            if not canPresent() then release(); return end
             local model=options.GetModel()
             if not model or not model.quest or model.quest.id~=current.quest.id or model.moment~=current.moment then
                 controller.Refresh(); return
@@ -172,7 +182,7 @@ function Controller.New(options)
             generation=generation+1
             local token=generation
             view=options.View.New(callbacks(token)); pending=true
-            options.Platform.TakeNative(prepared.moment,callbacks(token).NativeShown)
+            options.Platform.TakeNative(prepared.moment,callbacks(token).NativeShown,retainedCombat)
             local ready=view.Refresh(prepared)
             if failed or generation~=token then return end
             current,lastModel=prepared,prepared; pending=ready==false
@@ -210,11 +220,11 @@ function Controller.New(options)
         end
         local moment=current.moment
         guard("select",function()
-            if not options.Platform.CanPresent() then release(); return end
+            if not canPresent() then release(); return end
             pending=true
             if options.Prepare then generation=generation+1; hold(moment)
             elseif entry.kind~="conversation" then release() end
-            options.Platform.Select(entry,moment)
+            options.Platform.Select(entry,moment,retainedCombat)
         end)
     end
     function controller.Action(key)
@@ -226,9 +236,9 @@ function Controller.New(options)
         if not allowed then return false end
         local prepared,selected=current,current.selected
         guard("quest_action",function()
-            if not options.Platform.CanPresent() then release(); return end
+            if not canPresent() then release(); return end
             generation=generation+1; hold(prepared.moment)
-            options.Platform.QuestAction(prepared,key,selected)
+            options.Platform.QuestAction(prepared,key,selected,retainedCombat)
         end)
         return true
     end
@@ -274,6 +284,9 @@ function Controller.New(options)
         end)
     end
     function controller.Handle(event,questID)
+        if event=="PLAYER_REGEN_DISABLED" and options.Effects and activeMoment then
+            gameEvent=event; retainedCombat=true; effect("Suspend"); return true
+        end
         local moments={GOSSIP_SHOW="GOSSIP",GOSSIP_OPTIONS_REFRESHED="GOSSIP",QUEST_GREETING="GREETING"}
         if options.Prepare then moments.QUEST_DETAIL="OFFER"; moments.QUEST_PROGRESS="PROGRESS"; moments.QUEST_COMPLETE="COMPLETE" end
         local active=current or lastModel
@@ -292,7 +305,8 @@ function Controller.New(options)
             gameEvent=event; endSoon()
         elseif event=="GOSSIP_CLOSED" or event=="QUEST_FINISHED" or event=="PLAYER_LEAVING_WORLD"
             or event=="QUEST_DETAIL" or event=="QUEST_PROGRESS" or event=="QUEST_COMPLETE"
-            or event=="GOSSIP_CONFIRM" or event=="GOSSIP_ENTER_CODE" or event=="PLAYER_REGEN_DISABLED" then
+            or event=="GOSSIP_CONFIRM" or event=="GOSSIP_ENTER_CODE" or event=="PLAYER_REGEN_DISABLED"
+            or event=="CINEMATIC_START" or event=="PLAY_MOVIE" then
             gameEvent=event; release()
         end
         return event=="PLAYER_REGEN_DISABLED" or (options.Prepare and event=="QUEST_LOG_UPDATE")

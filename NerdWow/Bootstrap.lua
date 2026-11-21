@@ -7,7 +7,7 @@ local pendingEvents = 0
 local inWorld = false
 local initialized = false
 local interfaceInWorld = false
-local cinema,questReceipt
+local cinema,questReceipt,effects
 local warnings = {}
 local questDialogs = addon.QuestSession.New()
 addon.QuestDialogs = questDialogs
@@ -139,6 +139,7 @@ end
 dialogueEvents[#dialogueEvents + 1] = "PLAYER_REGEN_DISABLED"
 dialogueEvents[#dialogueEvents + 1] = "QUEST_LOG_UPDATE"
 dialogueEvents[#dialogueEvents + 1] = "PLAYER_REGEN_ENABLED"
+for _,event in ipairs(addon.CinematicIntegration.Events) do dialogueEvents[#dialogueEvents+1]=event end
 cinema = addon.ConversationController.New({ GetModel = function() return questDialogs.GetCurrent() or gossipDialogs.GetCurrent() end,
     Prepare=function(model)
         if model.quest then return addon.QuestPresentation.Build(model,addon.QuestPlatform.ReadState(model),questReceipt) end
@@ -147,6 +148,9 @@ cinema = addon.ConversationController.New({ GetModel = function() return questDi
     IsEnabled = function() return interfaceInWorld and settings and settings.Get().dialogEnabled end,
     GetPreferences=function() return settings and settings.Get() or {} end,
     Platform = addon.ConversationPlatform, View = addon.ConversationView,
+    Effects={Enter=function(model) if effects then effects.Enter(model) end end,
+        Leave=function(immediate) if effects then effects.Leave(immediate) end end,
+        Suspend=function() if effects then effects.Suspend() end end},
     Try = addon.DiagnosticAPI.Try,
     Diagnose = function(fault,context,model)
         addon.DiagnosticAPI.Record("interface",addon.DiagnosticAPI.Code(fault),fault,context,model)
@@ -231,6 +235,7 @@ end)
 Wow.Listen(function(event, loadedName, experience, money)
     currentGameEvent=event
     if event == "ADDON_LOADED" then
+        if initialized and effects then effects.Handle(event,loadedName) end
         if loadedName ~= addonName or initialized then
             return
         end
@@ -252,6 +257,8 @@ Wow.Listen(function(event, loadedName, experience, money)
         local settingsRoot, repaired
         settings, settingsRoot, repaired = addon.Settings.Open(addon.database.ReadSettings())
         addon.database.BindSettings(settingsRoot)
+        effects=addon.CinematicIntegration.New({Preferences=settings.Get})
+        effects.Recover()
         for _, field in ipairs(repaired) do
             Wow.Print(string.format(Text.settingsRecovered, Text.settingsFields[field] or field))
         end
@@ -299,6 +306,7 @@ Wow.Listen(function(event, loadedName, experience, money)
         return
     end
     if initialized then
+        local effectEvent=effects and effects.Handle(event,loadedName)
         if event=="PLAYER_LEAVING_WORLD" then addon.ConfigurationUI.Close() else addon.ConfigurationUI.RefreshInfo() end
         if event=="PLAYER_REGEN_ENABLED" then return end
         if event=="QUEST_DETAIL" or event=="QUEST_PROGRESS" or event=="QUEST_COMPLETE" or event=="QUEST_ITEM_UPDATE"
@@ -310,7 +318,7 @@ Wow.Listen(function(event, loadedName, experience, money)
             handled = capture.Handle(event, loadedName, experience, money) or handled
         end
         handled = cinema.Handle(event,loadedName) or handled
-        if handled then return end
+        if handled or effectEvent then return end
     end
     if not journal then
         return

@@ -168,6 +168,12 @@ if configuration then
             html[#html+1]='<h2>Tipografia · '..kind..' · '..percent..'% · 3440x1440</h2>'..draw(s)
         end
     end
+    for _,percent in ipairs({80,100,140}) do
+        local s=configuration.scene(); s.version=configuration.version; s.source={moment="CAMERA"..percent}
+        s.r.uiScale=.8; s.r.parent:SetSize(3440/.8,1440/.8); s.settings.Set("textSize",percent)
+        s.open(); s.select("Câmera e interface")
+        html[#html+1]='<h2>Câmera e interface · '..percent..'% · 3440x1440</h2>'..draw(s)
+    end
     for _,chapter in ipairs({"Geral","Diálogo","Câmera e interface","Personagem","Diário","Avançado","Sobre"}) do
         local s=configuration.scene(); s.version=configuration.version; s.source={moment="BOOK"..#html}
         s.diagnostics={{lastTimestamp=1,code="interface_error",count=2,version="0.7.2",message="Exemplo de diagnóstico: fonte indisponível durante a apresentação.",context={stage="show"}}}

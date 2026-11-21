@@ -104,7 +104,7 @@ test("livro acomoda papéis e controles nos extremos em cinco resoluções e esc
         local s=t.configuration.scene(); viewport(s.r,size,scale); s.settings.Set("textSize",percent)
         local root=s.open()
         local line=lineLimit(s.r,s.n,s.n.FontAPI.Scale(percent).note)
-        for _,chapter in ipairs({"Geral","Diálogo","Personagem","Diário","Sobre"}) do
+        for _,chapter in ipairs({"Geral","Diálogo","Câmera e interface","Personagem","Diário","Sobre"}) do
             s.select(chapter); readable(s.r,root,scale)
             for _,region in ipairs(s.r.regions) do
                 if region.text and region.text:find("Mostra o livro",1,true) and inView(region,root) then

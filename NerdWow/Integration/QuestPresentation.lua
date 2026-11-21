@@ -57,8 +57,8 @@ function Platform.ReadState(model)
     end
     return state
 end
-function Platform.Action(view,key,selected)
-    if not addon.ConversationPlatform.CanPresent() then error("combat_interface") end
+function Platform.Action(view,key,selected,retainedCombat)
+    if not addon.ConversationPlatform.CanPresent(retainedCombat) then error("combat_interface") end
     local state=Platform.ReadState(view)
     if state.nativeRequired then error("quest_native_required") end
     if view.moment=="OFFER" and key=="ACCEPT" and not state.autoAccept then call(AcceptQuest)

@@ -10,6 +10,7 @@
 - Substitui a janela de conversa da Blizzard: barras de cinema, nome e brasão do NPC, e a fala aparecendo letra a letra.
 - Opções numeradas, que podem ser escolhidas pelas teclas **1 a 9**.
 - O visual muda conforme o lugar e o NPC: **Aliança**, **Horda**, **Quel'Thalas** ou **Neutro**.
+- A câmera aproxima o interlocutor e os controles do jogo se recolhem durante o diálogo, conforme as Configurações.
 
 **Missões em pergaminho**
 - Oferta, progresso e conclusão aparecem num pergaminho à direita, com a legenda do NPC à esquerda.
@@ -30,7 +31,6 @@
 
 ### Em breve
 
-- Câmera cinematográfica no NPC durante a conversa.
 - Narração das falas por voz (TTS).
 - Registro das falas de NPCs no chat.
 
@@ -78,7 +78,7 @@ O pergaminho ajusta a altura ao conteúdo e rola quando chega ao limite. Nos ite
 
 A nota no rodapé aparece quando a oferta ou o progresso foi registrado no diário. A conclusão é registrada após a entrega confirmada pelo jogo. O arquivo em disco continua sendo gravado ao sincronizar, usar `/reload` ou sair do jogo.
 
-`/nerdwow dialogo` também liga e desliga o pergaminho. Em combate, em caso de falha ou numa missão que exija uma confirmação especial da Blizzard (como PvP ou custo de entrega), a interface nativa fica disponível.
+`/nerdwow dialogo` também liga e desliga o pergaminho e os efeitos de câmera/interface. Uma conversa já aberta continua utilizável ao entrar em combate, com a câmera e os controles restaurados. Uma nova conversa iniciada em combate, uma falha ou uma missão que exija confirmação especial da Blizzard (como PvP ou custo de entrega) mantém a interface nativa disponível.
 
 ### Botão do minimapa
 
@@ -94,6 +94,10 @@ Abra o livro com `/nerdwow config`, pelo botão direito no minimapa ou em **Opç
 No livro, você pode mostrar ou ocultar o botão, escolher um tema automático ou fixo, ligar o cinema, ajustar a velocidade da fala e desligar os atalhos **1–9**. **Espaço**, **Esc** e os cliques continuam funcionando. As mudanças valem na hora, inclusive na conversa e no pergaminho já abertos.
 
 Em **Geral → Tamanho do texto**, ajuste de **80% a 140%**, em passos de 5%. A escala comum mantém a leitura proporcional entre conversa, pergaminho e livro, considerando a altura física da tela e a escala de interface. O padrão é **100%** e faz parte de **Restaurar padrões**.
+
+Em **Câmera e interface**, ligue ou desligue **Aproximar a câmera do NPC** e **Ocultar a interface do jogo**, e ajuste a **Intensidade do zoom** de **1 a 5**. Os padrões são ligados e intensidade **3**. Essas opções valem na próxima abertura de diálogo. Câmera e controles voltam ao terminar; as trocas entre conversa e missão preservam o enquadramento. Nomes no mundo, alertas e janelas do NerdWow continuam visíveis. Sem modelo confiável, em veículo, táxi ou combate, a câmera fica como estava. O jogo pode mostrar seu aviso de câmera experimental.
+
+O addon guarda a recuperação da câmera antes de alterá-la e tenta restaurá-la no próximo carregamento quando necessário. O WoW só grava SavedVariables em reload/logout: uma queda abrupta antes dessa gravação pode perder a recuperação ainda em memória.
 
 O capítulo **Diário** mostra os eventos e permite sincronizar com a confirmação existente. **Avançado** mostra os diagnósticos e o teste de fontes; **Sobre** traz a versão e um endereço selecionável do GitHub para copiar com **Ctrl+C**. As opções marcadas **em breve** ficam desativadas.
 

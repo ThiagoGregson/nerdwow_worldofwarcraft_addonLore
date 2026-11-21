@@ -27,6 +27,7 @@ local function core()
     loadModule("Dialogue/GossipSession.lua", namespace, environment)
     loadModule("Interface/Themes.lua", namespace, environment)
     loadModule("Interface/Typography.lua", namespace, environment)
+    loadModule("Interface/Cinematic.lua", namespace, environment)
     loadModule("Interface/Conversation.lua", namespace, environment)
     loadModule("Interface/QuestPresentation.lua", namespace, environment)
     loadModule("Interface/ConversationController.lua", namespace, environment)
@@ -35,7 +36,7 @@ local function core()
     loadModule("Diagnostics/Diagnostics.lua", namespace, environment)
     loadModule("Configuration/Settings.lua", namespace, environment)
     loadModule("Minimap/Button.lua", namespace, environment)
-    for _,path in ipairs({"Configuration/Registry.lua","Configuration/GeneralOptions.lua","Interface/ConversationOptions.lua",
+    for _,path in ipairs({"Configuration/Registry.lua","Configuration/GeneralOptions.lua","Interface/ConversationOptions.lua","Interface/CinematicOptions.lua",
         "Configuration/PlannedOptions.lua","Journal/Options.lua","Diagnostics/Options.lua","Configuration/AboutOptions.lua",
         "Configuration/Catalog.lua","Configuration/Book.lua"}) do loadModule(path,namespace,environment) end
     return namespace
@@ -341,6 +342,7 @@ local function client(saved, settings, absentSettings)
         settings = { schemaVersion = 1, minimapHidden = false, minimapAngle = 225 , dialogEnabled = true}
     end
     local env = {
+        rawget=rawget,
         NerdWow_Journal = saved, NerdWow_Settings = settings, type = type, pairs = pairs, ipairs = ipairs,
         math = math, string = string, pcall = pcall, tonumber = tonumber,
         table = table, error = error, assert = assert, tostring = tostring,
@@ -351,6 +353,7 @@ local function client(saved, settings, absentSettings)
         UIParent = false, GameFontNormal = {},Enum={TooltipDataLineType={None=0,UnitName=2,UnitLevel=47,UnitType=48}},C_QuestInfoSystem=false,
         UnitTokenFromGUID=false,C_Item=false,Settings=false,
     }
+    env._G=env
     env.InCombatLockdown = function() return state.inCombat end
     env.C_UI = { Reload = function() state.reloads = state.reloads + 1 end }
     env.StaticPopup_Show = function(which)
@@ -625,9 +628,9 @@ test("metadados e carregamento real do TOC", function()
     equal(metadata.Interface, "120105")
     equal(metadata.Title, "NerdWow")
     equal(metadata.Author, "Greg")
-    equal(metadata.Version, "0.9.0")
+    equal(metadata.Version, "0.10.0")
     equal(metadata.SavedVariables, "NerdWow_Journal, NerdWow_Settings, NerdWow_Diagnostics")
-    equal(#order, 41)
+    equal(#order, 44)
     for _, path in ipairs(order) do assert(not path:find("Tests/", 1, true)) end
     local c = client()
     equal(c.env.SLASH_NERDWOW1, "/nerdwow")
@@ -662,7 +665,7 @@ test("entrada, status pt-BR e ajuda", function()
     equal(events[2].type, "LOCATION_CHANGED")
     equal(events[2].timestamp, TIME)
     c.command()
-    assert(c.messages[1]:find("v0.9.0 | esquema 1 | 2 eventos", 1, true))
+    assert(c.messages[1]:find("v0.10.0 | esquema 1 | 2 eventos", 1, true))
     assert(c.messages[1]:find("mudança de local", 1, true))
     assert(c.messages[1]:find("UTC", 1, true))
     assert(c.messages[2]:find("/reload", 1, true))
@@ -836,7 +839,7 @@ test("TOC resolve callback do compartimento para a mesma confirmação", functio
         equal(serialize(c.saved()), before)
         local count = 0
         for _ in pairs(c.registered) do count = count + 1 end
-        equal(count, 23)
+        equal(count, 28)
     end
 end)
 
@@ -922,7 +925,7 @@ end)
 
 test("configuração válida preserva extras e Get devolve uma cópia", function()
     local root = { schemaVersion = 1, minimapHidden = true, minimapAngle = 12.5, dialogEnabled = true,
-        theme="auto",speechSpeed=60,numberHotkeys=true,textSize=100,extension = { keep = true } }
+        theme="auto",speechSpeed=60,numberHotkeys=true,textSize=100,cameraEnabled=true,cameraIntensity=3,hideGameUI=true,extension = { keep = true } }
     local before = serialize(root)
     local handle, returned, repaired = core().Settings.Open(root)
     equal(returned, root)
@@ -1180,7 +1183,7 @@ test("dica mostra versão, totais, pendentes, UTC e instruções em pt-BR", func
     local c = client()
     c.start()
     local text = tooltipText(c)
-    for _, expected in ipairs({ "NerdWow v0.9.0", "Eventos no diário: 2",
+    for _, expected in ipairs({ "NerdWow v0.10.0", "Eventos no diário: 2",
         "Novos desta sessão aguardando gravação: 2", "Último evento:", "UTC",
         "Clique esquerdo: sincronizar", "Arraste com o botão esquerdo" }) do
         assert(text:find(expected, 1, true), expected)
@@ -1272,6 +1275,9 @@ configurationFixtures.version=metadata.Version
 local typographySuite=assert(loadstring(sources["Tests/Typography.lua"],"@Tests/Typography.lua"))
 typographySuite({test=test,equal=equal,core=core,client=client,serialize=serialize,roundtrip=roundtrip,
     surfaces=surfaces,parchment=parchmentFixtures,configuration=configurationFixtures})
+local cinematicSuite=assert(loadstring(sources["Tests/Cinematic.lua"],"@Tests/Cinematic.lua"))
+cinematicSuite({test=test,equal=equal,core=core,client=client,loadModule=loadModule,serialize=serialize,
+    roundtrip=roundtrip,surfaces=surfaces,parchment=parchmentFixtures,configuration=configurationFixtures,A=A})
 local report=string.format("%d cenários aprovados; runtime: %s / %s. Integração real no Retail pendente.\n%s",
     passed, _VERSION, jit and jit.version or "sem JIT", estimate)
 if previewFonts then

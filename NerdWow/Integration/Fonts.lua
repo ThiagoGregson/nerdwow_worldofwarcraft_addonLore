@@ -19,6 +19,15 @@ local function restricted(value)
 end
 local function normalized(path) return type(path)=="string" and path:gsub("/","\\"):lower() or "" end
 local function positive(value) return type(value)=="number" and value>0 and value<math.huge end
+function Fonts.Scale(percent)
+    local _,height=GetPhysicalScreenSize()
+    height=restricted(height)
+    local effective=restricted(UIParent:GetEffectiveScale())
+    if not positive(height) or not positive(effective) then error("layout_unavailable") end
+    local value=addon.Typography.Build(height,effective/(768/height),percent)
+    if not value then error("layout_unavailable") end
+    return value
+end
 local function setFont(object,path,size,flags)
     -- EditBox requires a string even though FontString accepts absent flags.
     -- Keep this normalization at the only SetFont boundary, including probes.

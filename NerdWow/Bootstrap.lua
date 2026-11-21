@@ -277,7 +277,7 @@ Wow.Listen(function(event, loadedName, experience, money)
                 local changed={}; for _,key in ipairs(keys) do changed[key]=true end
                 if changed.minimapHidden then minimap.Refresh() end
                 if changed.dialogEnabled then cinema.Toggle()
-                elseif changed.theme or changed.speechSpeed or changed.numberHotkeys then cinema.Configure() end
+                elseif changed.theme or changed.speechSpeed or changed.numberHotkeys or changed.textSize then cinema.Configure() end
                 addon.ConfigurationUI.Refresh()
             end)
             if not ok then addon.DiagnosticAPI.Record("interface","configuration_apply_failed",fault,{stage="configuration_apply"}) end

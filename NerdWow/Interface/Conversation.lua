@@ -50,35 +50,38 @@ function Conversation.Configure(view,preferences)
     view.theme=addon.DialogueThemes.Resolve(view.location,view.npc,preferences.theme)
     view.speechSpeed=preferences.speechSpeed or Conversation.DEFAULT_SPEED
     view.numberHotkeys=preferences.numberHotkeys~=false
+    view.textSize=preferences.textSize or 100
 end
 Conversation.LINE_SAMPLE="A história de Azeroth vive nas palavras de quem protege os antigos lares"
-function Conversation.Layout(width,height,lineWidth)
+function Conversation.Layout(width,height,lineWidth,typography)
     if type(width)~="number" or type(height)~="number" or width<=0 or height<=0
         or width==math.huge or height==math.huge or width~=width or height~=height then return nil end
     local scale=math.min(width/1280,height/720)
-    local speechSize=22*scale
+    typography=typography or addon.Typography.Build(height,1,100)
+    local speechSize=typography.speech
     if type(lineWidth)~="number" or lineWidth<=0 or lineWidth~=lineWidth or lineWidth==math.huge then
-        lineWidth=72*speechSize*.5
+        lineWidth=72*typography.body*.5
     end
     local textWidth=math.min(width*.88-84*scale,lineWidth)
     return { scale=scale, width=width, height=height, top=height*.09, bottom=height*.27,
         maximumBottom=height*.38, textWidth=textWidth, textLeft=(width-textWidth)/2,
-        contentWidth=textWidth+84*scale, speechSize=speechSize,
-        optionSize=18*scale, nameSize=21*scale, zoneSize=15*scale }
+        contentWidth=textWidth+84*typography.unit, speechSize=speechSize,typography=typography,
+        optionSize=typography.body, nameSize=typography.heading, zoneSize=typography.heading }
 end
 function Conversation.Arrange(layout,header,speech,options)
     local s=layout.scale
+    local noteHeight=layout.typography.note*1.6
     -- Give measured options priority over extra speech lines. Both viewports
     -- stay inside the bar; only lists that exceed the remaining space scroll.
     local minimumSpeech=math.min(speech,layout.speechSize*1.6)
-    local capacity=math.max(1,layout.maximumBottom-(18*s+header+8*s+14*s+12*s+18*s+minimumSpeech))
-    local optionHint=options>capacity and 14*s or 0
+    local capacity=math.max(1,layout.maximumBottom-(18*s+header+8*s+noteHeight+12*s+18*s+minimumSpeech))
+    local optionHint=options>capacity and noteHeight or 0
     local optionHeight=math.min(options,math.max(1,capacity-optionHint))
     local optionBottom=18*s+optionHint
-    local fixed=18*s+header+8*s+14*s+12*s+optionHeight+optionBottom
+    local fixed=18*s+header+8*s+noteHeight+12*s+optionHeight+optionBottom
     local bottom=math.min(layout.maximumBottom,math.max(layout.bottom,fixed+speech))
     local speechTop=bottom-18*s-header-8*s
-    local speechBottom=optionBottom+optionHeight+12*s+14*s
+    local speechBottom=optionBottom+optionHeight+12*s+noteHeight
     return {bottom=bottom,headerTop=bottom-18*s,speechTop=speechTop,
         speechHeight=math.max(1,speechTop-speechBottom),speechBottom=speechBottom,
         optionHeight=math.max(1,optionHeight),optionBottom=optionBottom,optionHint=optionHint>0}

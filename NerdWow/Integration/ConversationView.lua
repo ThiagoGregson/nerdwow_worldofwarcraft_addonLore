@@ -105,6 +105,7 @@ local function textWidth(text,file,size,requireMetric)
 end
 local function textHeight(object,text,file,size,width)
     font(object,file,size)
+    object:SetSpacing(layout.typography.gap)
     object:SetWidth(width); object:SetHeight(100000); object:SetText(text); object:Show()
     local height=object:GetStringHeight()
     if type(height)~="number" or height<=0 or height==math.huge then
@@ -162,37 +163,40 @@ local function place()
     local viewport=dimensions()
     local width,height=viewport.viewportWidth,viewport.viewportHeight
     local layoutFor=model.kind=="quest" and addon.QuestPresentation.Layout or addon.Conversation.Layout
-    layout=layoutFor(width,height)
+    local t=addon.FontAPI.Scale(model.textSize)
+    layout=layoutFor(width,height,nil,t)
     if not layout then return false end
     local s=layout.scale
-    layout=layoutFor(width,height,textWidth(addon.Conversation.LINE_SAMPLE,"EBGaramond-Regular",layout.speechSize))
+    layout=layoutFor(width,height,textWidth(addon.Conversation.LINE_SAMPLE,"EBGaramond-Regular",t.body),t)
+    local u=t.unit
     local widthText,left=layout.textWidth,layout.textLeft
     local titleText=model.npc and model.npc.title or ""
-    local titleSpace=titleText~="" and math.min(widthText*.36,textWidth(titleText,"EBGaramond-Italic",17*s)+14*s) or 0
+    local titleSpace=titleText~="" and math.min(widthText*.36,
+        math.ceil(textWidth(titleText,"EBGaramond-Italic",t.note)+t.note*.15+4*s)+14*u) or 0
     name:ClearAllPoints(); name:SetPoint("TOPLEFT",root,"BOTTOMLEFT",left,layout.bottom-18*s)
     local nameWidth,nameHeight=fit(name,model.npc and model.npc.name or addon.Text.cinemaUnknownNPC,
-        "Cinzel-Bold",layout.nameSize,14*s,widthText-titleSpace)
+        "Cinzel-Bold",layout.nameSize,t.minimum,widthText-titleSpace)
     color(name,model.theme.glow)
-    title:ClearAllPoints(); title:SetPoint("TOPLEFT",name,"TOPRIGHT",14*s,-3*s)
-    local _,titleHeight=fit(title,titleText,"EBGaramond-Italic",17*s,13*s,math.max(1,widthText-nameWidth-14*s))
+    title:ClearAllPoints(); title:SetPoint("TOPLEFT",name,"TOPRIGHT",14*u,-3*s)
+    local _,titleHeight=fit(title,titleText,"EBGaramond-Italic",t.note,t.minimum,math.max(1,widthText-nameWidth-14*u))
     color(title,model.theme.muted)
     local header=math.max(nameHeight,titleText~="" and titleHeight+3*s or 0)
     zone:ClearAllPoints(); zone:SetPoint("TOP",root,"TOP",0,-6*s)
     local zoneWidth=fit(zone,model.location and model.location.zone or addon.Text.cinemaUnknownLocation,
-        "Cinzel-Regular",layout.zoneSize,12*s,width*.4)
+        "Cinzel-Regular",layout.zoneSize,t.minimum,width*.4)
     color(zone,model.theme.glow,.85); zone:SetJustifyH("CENTER")
     subzone:ClearAllPoints(); subzone:SetPoint("TOP",zone,"BOTTOM",0,-1*s)
     local subzoneText=model.location and model.location.subZone or ""
-    local subzoneWidth=fit(subzone,subzoneText,"EBGaramond-Regular",13*s,11*s,width*.3)
+    local subzoneWidth=fit(subzone,subzoneText,"EBGaramond-Regular",t.note,t.minimum,width*.3)
     color(subzone,model.theme.muted); subzone:SetJustifyH("CENTER")
     local zoneGroup=zoneWidth+(subzoneText~="" and subzoneWidth+12*s or 0)
     zone:ClearAllPoints(); zone:SetPoint("TOPLEFT",root,"TOPLEFT",(width-zoneGroup)/2,-6*s)
     subzone:ClearAllPoints(); subzone:SetPoint("TOPLEFT",zone,"TOPRIGHT",12*s,-3*s)
     hint:ClearAllPoints(); hint:SetPoint("TOPRIGHT",root,"TOPRIGHT",-48*s,-layout.top+17*s)
-    local _,hintHeight=fit(hint,addon.Conversation.Hint(model,not speech.IsComplete()),"EBGaramond-Regular",12*s,10*s,width*.65)
+    local _,hintHeight=fit(hint,addon.Conversation.Hint(model,not speech.IsComplete()),"EBGaramond-Regular",t.note,t.minimum,width*.65)
     hint:ClearAllPoints(); hint:SetPoint("TOPRIGHT",root,"TOPRIGHT",-48*s,-layout.top+hintHeight+4*s)
     color(hint,model.theme.muted,.8)
-    font(exit.label,"Cinzel-Regular",24*s); color(exit.label,model.theme.muted)
+    font(exit.label,"Cinzel-Regular",t.heading); color(exit.label,model.theme.muted)
     exit:SetSize(28*s,28*s); exit:ClearAllPoints(); exit:SetPoint("TOPRIGHT",root,"TOPRIGHT",-14*s,-6*s)
     exit.label:SetWordWrap(false)
     scroll:SetWidth(widthText); child:SetWidth(widthText)
@@ -202,7 +206,7 @@ local function place()
     for index,part in ipairs(paragraphData) do
         local object=paragraphs[index]
         if not object then object=label(child); paragraphs[index]=object end
-        object:SetWordWrap(true); object:SetNonSpaceWrap(true); object:SetSpacing(3*s)
+        object:SetWordWrap(true); object:SetNonSpaceWrap(true); object:SetSpacing(t.gap)
         object:ClearAllPoints(); object:SetPoint("TOPLEFT",child,"TOPLEFT",0,-speechHeight)
         color(object,model.theme.subtitle)
         speechHeight=speechHeight+textHeight(object,part.text,"EBGaramond-Regular",layout.speechSize,widthText)
@@ -217,9 +221,9 @@ local function place()
         local tokenCallbacks=callbacks
         b:SetScript("OnClick",safe(function() tokenCallbacks.Choose(index) end))
         local text=entry.text and entry.text:find("%S") and entry.text or addon.Text.cinemaUnknownOption
-        local numberSize=layout.optionSize*.78
+        local numberSize=t.note
         local diameter=numberSize*1.6
-        local labelLeft=diameter+28*s
+        local labelLeft=diameter+28*u
         local itemWidth=math.min(widthText,math.max(110*s,textWidth(text,"EBGaramond-Regular",layout.optionSize)+labelLeft+12*s))
         if x>0 and x+itemWidth>widthText then x=0; y=y-rowHeight-7*s; rowHeight=0 end
         b:ClearAllPoints(); b:SetPoint("TOPLEFT",optionChild,"TOPLEFT",x,y)
@@ -235,9 +239,9 @@ local function place()
         font(b.number,"Cinzel-Regular",numberSize); color(b.number,model.theme.accent)
         b.number:SetWordWrap(false); b.number:SetText(tostring(index)); b.number:SetJustifyH("CENTER"); b.number:SetJustifyV("MIDDLE")
         b.number:ClearAllPoints(); b.number:SetPoint("CENTER",b.ring,"CENTER",0,0); b.number:SetSize(diameter,diameter)
-        b.icon:ClearAllPoints(); b.icon:SetPoint("TOPLEFT",b,"TOPLEFT",diameter+8*s,-6*s); b.icon:SetSize(16*s,16*s)
-        b.symbol:ClearAllPoints(); b.symbol:SetPoint("TOPLEFT",b,"TOPLEFT",diameter+8*s,-4*s); b.symbol:SetSize(20*s,26*s)
-        font(b.symbol,"Cinzel-Bold",18*s); b.symbol:SetWordWrap(false)
+        b.icon:ClearAllPoints(); b.icon:SetPoint("TOPLEFT",b,"TOPLEFT",diameter+8*u,-6*u); b.icon:SetSize(16*u,16*u)
+        b.symbol:ClearAllPoints(); b.symbol:SetPoint("TOPLEFT",b,"TOPLEFT",diameter+8*u,-4*u); b.symbol:SetSize(20*u,t.heading*1.5)
+        font(b.symbol,"Cinzel-Bold",t.heading); b.symbol:SetWordWrap(false)
         color(b.symbol,entry.kind=="active" and model.theme.muted or model.theme.secondary)
         if entry.kind=="conversation" and entry.icon then
             b.icon:SetTexture(entry.icon); b.icon:Show(); b.symbol:Hide()
@@ -259,11 +263,11 @@ local function place()
     optionScroll:ClearAllPoints(); optionScroll:SetPoint("BOTTOMLEFT",root,"BOTTOMLEFT",left,boxes.optionBottom)
     optionScroll:SetHeight(boxes.optionHeight)
     more:ClearAllPoints(); more:SetPoint("TOPLEFT",root,"BOTTOMLEFT",left,boxes.speechBottom-2*s)
-    font(more,"EBGaramond-Regular",12*s); color(more,model.theme.muted,.8)
-    more:SetSize(widthText,14*s); more:SetWordWrap(false)
+    font(more,"EBGaramond-Regular",t.note); color(more,model.theme.muted,.8)
+    more:SetSize(widthText,t.note*1.6); more:SetWordWrap(false)
     optionsMore:ClearAllPoints(); optionsMore:SetPoint("BOTTOMLEFT",root,"BOTTOMLEFT",left,18*s)
-    font(optionsMore,"EBGaramond-Regular",12*s); color(optionsMore,model.theme.muted,.8)
-    optionsMore:SetSize(widthText,14*s); optionsMore:SetWordWrap(false)
+    font(optionsMore,"EBGaramond-Regular",t.note); color(optionsMore,model.theme.muted,.8)
+    optionsMore:SetSize(widthText,t.note*1.6); optionsMore:SetWordWrap(false)
     scroll:UpdateScrollChildRect(); optionScroll:UpdateScrollChildRect()
     scroll:SetVerticalScroll(math.min(scroll:GetVerticalScroll(),scroll:GetVerticalScrollRange()))
     optionScroll:SetVerticalScroll(math.min(optionScroll:GetVerticalScroll(),optionScroll:GetVerticalScrollRange()))
@@ -275,8 +279,8 @@ local function place()
     edgeRight:SetGradient("HORIZONTAL",CreateColor(ar,ag,ab,.6),CreateColor(ar,ag,ab,0))
     for _,edge in ipairs({edgeLeft,edgeRight}) do edge:SetSize(width/2,1) end
     crest:SetTexture(model.theme.crest); crestShadow:SetTexture(model.theme.crest)
-    crest:SetSize(56*s,56*s); crestShadow:SetSize(58*s,58*s)
-    crest:ClearAllPoints(); crest:SetPoint("TOPLEFT",root,"BOTTOMLEFT",left-84*s,boxes.headerTop)
+    crest:SetSize(56*u,56*u); crestShadow:SetSize(58*u,58*u)
+    crest:ClearAllPoints(); crest:SetPoint("TOPLEFT",root,"BOTTOMLEFT",left-84*u,boxes.headerTop)
     crestShadow:ClearAllPoints(); crestShadow:SetPoint("CENTER",crest,"CENTER",0,-2*s)
     crestShadow:SetVertexColor(0,0,0,.65); crest:SetVertexColor(1,1,1,1)
     if model.kind=="quest" then questPaper.Place(model,layout) end
@@ -415,15 +419,14 @@ function View.New(newCallbacks)
         if not initial then
             handle.Transition(); return false,"layout_pending",viewport
         end
+        initial=addon.Conversation.Layout(viewport.viewportWidth,viewport.viewportHeight,nil,addon.FontAPI.Scale(input.textSize))
         local s=initial.scale
-        if input.kind=="quest" then questPaper.Prepare(s) end
+        if input.kind=="quest" then questPaper.Prepare(initial.typography) end
         -- Start the sizes needed by this layout together, so a missing asset has
         -- one verification window instead of a separate wait for every label.
-        for _,request in ipairs({{"Cinzel-Bold",initial.nameSize},{"EBGaramond-Italic",17*s},
-            {"Cinzel-Regular",initial.zoneSize},{"EBGaramond-Regular",13*s},{"EBGaramond-Regular",12*s},
-            {"Cinzel-Regular",24*s},{"EBGaramond-Regular",initial.speechSize},
-            {"EBGaramond-Regular",initial.optionSize},{"Cinzel-Regular",initial.optionSize*.78},
-            {"Cinzel-Bold",18*s}}) do addon.FontAPI.Prepare(request[1],request[2]) end
+        for _,file in ipairs({"Cinzel-Bold","EBGaramond-Italic","Cinzel-Regular","EBGaramond-Regular"}) do
+            addon.FontAPI.Prepare(file,initial.typography.body)
+        end
         shown=true; preparing=true
         root:SetAlpha(0); root:Show(); scroll:Show(); optionScroll:Show(); preparing=false
         if faulted or not shown then return false,"view_failed",dimensions() end

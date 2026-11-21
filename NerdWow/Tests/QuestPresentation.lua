@@ -512,7 +512,7 @@ test("cartão exigido expõe quantidade e posse com fonte segura e sem alterar f
     s.r.env.C_Item.GetItemCount=function() return 9 end
     s.c.Handle("QUEST_LOG_UPDATE"); assert(s.text("Em posse: 9/8")); equal(t.serialize(s.source),before)
     local name=s.text("Tomo chamuscado"); local count=s.text("Em posse: 9/8")
-    assert(name.parent.height>=name.height+count.height+16); s.c.Close()
+    assert(name.parent.height>=name.height+count.height+16*s.n.FontAPI.Scale().unit); s.c.Close()
 end)
 
 test("quantidade exigida não inventa posse quando ausente restrita ou API falha",function()
@@ -653,7 +653,7 @@ test("evento oculta nativa antes do defer e troca conversa missão conversa sob 
     s.r.advance(0); s.root().scripts.OnUpdate(s.root(),1)
     local top,bottom=s.r.regions[1],s.r.regions[2]; local topHeight=top.height
     s.r.fontBehavior=function(path,size)
-        if path:find("Cinzel-Bold",1,true) and size==27 then return {delay=.45} end
+        if path:find("Cinzel-Bold",1,true) and size==s.n.FontAPI.Scale().title then return {delay=.45} end
     end
     local gossipStart=#s.p.root.alphaHistory+1
     s.c.Choose(1); equal(s.p.root.alpha,0); equal(s.p.action,"SelectAvailableQuest")
@@ -744,7 +744,7 @@ test("arquivo pronto dispensa sonda por tamanho e verifica identidade da região
         s.n.FontAPI.Preload(); r.advance(.1)
         r.fontBehavior=function(path,size)
             if not path:find("NerdWow\\Fonts\\",1,true) then return end
-            if size==27 then return {delay=.5,identityNow=mode=="metric",factor=0} end
+            if size==s.n.FontAPI.Scale().title then return {delay=.5,identityNow=mode=="metric",factor=0} end
         end
         s.c.Handle("QUEST_DETAIL"); r.advance(0)
         equal(s.p.env.QuestFrame.alpha,0)
@@ -816,7 +816,7 @@ test("capitulares M W e acentuadas reservam largura medida sem sobrepor corpo em
             assert(cap); equal(cap.wrap,false); equal(cap.nonSpaceWrap,false)
             assert(cap.width>=cap:GetUnboundedStringWidth()); assert(cap.height>=cap:GetStringHeight())
             assert(body)
-            assert(body.points[1][4]>=cap.points[1][4]+cap.width+7*(size[2]/720)-.01)
+            assert(body.points[1][4]>=cap.points[1][4]+cap.width+7*s.n.FontAPI.Scale().unit-.01)
             s.c.Close()
         end
     end
@@ -835,7 +835,7 @@ test("capitular insegura deixa primeiro parágrafo integral sem perda nem retic�
             local apply=s.n.FontAPI.Apply
             s.n.FontAPI.Apply=function(object,name,size)
                 local a,b=apply(object,name,size)
-                if name=="Cinzel-Bold" and size==48 then object.GetUnboundedStringWidth=function() error("cap metric unavailable") end end
+                if name=="Cinzel-Bold" and size==s.n.FontAPI.Scale().initial then object.GetUnboundedStringWidth=function() error("cap metric unavailable") end end
                 return a,b
             end
         end
@@ -886,7 +886,7 @@ test("recuperação de fonte na missão conserva fala seleção e animação",fu
     local s=scene("COMPLETE",true); s.n.FontAPI.Preload(); s.r.advance(.2)
     s.source.quest.rewardText="A memória dos nomes que você trouxe será preservada nos tomos da biblioteca. Obrigada por retornar."
     local blocked=true
-    s.r.rejectFont=function(path,size) return blocked and size==27 and path:find("Cinzel-Bold",1,true)~=nil end
+    s.r.rejectFont=function(path,size) return blocked and size==s.n.FontAPI.Scale().title and path:find("Cinzel-Bold",1,true)~=nil end
     s.c.Refresh(); s.c.Choose(2)
     local root=s.root(); root.scripts.OnUpdate(root,.15)
     local before={}
@@ -965,6 +965,9 @@ test("títulos de uma duas e três linhas respeitam altura real nos três moment
                 local lastHeight=0
                 for lines,title in ipairs(titles) do
                     local s=scene(moment); s.r.parent:SetSize(size[1]/scale,size[2]/scale)
+                    local width=math.min(size[1]/scale*.37,490*(size[2]/scale/720))-78*(size[2]/scale/720)
+                    local characters=math.floor(width/(s.n.FontAPI.Scale().title*.58)*(lines-.25))
+                    title=string.rep("M",characters) -- natural wrapping at the new final font size.
                     s.source.quest.title=title; s.source.npc={name="Delegado Pedrosa"}
                     s.source.objectives={}; s.source.requiredItems={}; s.source.rewards={choices={},fixed={},experience=554}
                     s.source.quest.description="Você chegou."; s.source.quest.progressText="Veio receber a recompensa?"

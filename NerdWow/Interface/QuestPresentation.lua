@@ -139,8 +139,8 @@ function Quest.Note(view)
     if moments[kind]==view.moment and addon.Text.questRecorded[kind] then return addon.Text.questRecorded[kind] end
     return view.moment=="COMPLETE" and addon.Text.questWillRecord or ""
 end
-function Quest.Layout(width,height,lineWidth)
-    local layout=addon.Conversation.Layout(width,height,lineWidth)
+function Quest.Layout(width,height,lineWidth,typography)
+    local layout=addon.Conversation.Layout(width,height,lineWidth,typography)
     if not layout then return nil end
     local s=layout.scale
     layout.paperWidth=math.min(width*.37,490*s)

@@ -25,7 +25,7 @@ local function display(value)
     return tostring(value)
 end
 function View.New(callbacks)
-    local v,layout,snapshot,theme={},nil,nil,nil
+    local v,layout,snapshot,theme,t={},nil,nil,nil,nil
     local elapsed,pending,rendering=0,false,false
     local root=CreateFrame("Frame",nil,UIParent); root:Hide(); root:SetAllPoints(UIParent)
     root:SetFrameStrata("DIALOG"); root:EnableMouse(true); root:EnableKeyboard(false); root:SetPropagateKeyboardInput(true)
@@ -99,6 +99,10 @@ function View.New(callbacks)
     local function text(object,value,file,size,width)
         if value==nil or value=="" then object:SetText(""); object:Hide(); return 0 end
         font(object,file,size)
+        object:SetSpacing(t.gap)
+        object:SetWidth(width); object:SetHeight(100000); object:Show()
+        object:SetText(addon.Conversation.LINE_SAMPLE)
+        width=math.min(width,object:GetUnboundedStringWidth())
         object:SetWidth(width); object:SetHeight(100000); object:SetText(value or ""); object:Show()
         local height=object:GetStringHeight()
         if issecretvalue and issecretvalue(height) or type(height)~="number" or height<=0 or height>=math.huge then error("layout_unavailable") end
@@ -175,7 +179,10 @@ function View.New(callbacks)
     local function formatButton(b,caption,width,height,primary)
         local s=layout.scale
         b:SetSize(width,height); b.label:SetText(caption)
-        font(b.label,"Cinzel-Bold",13.5*s,primary and "f7ecd4" or "2a1d12")
+        font(b.label,"Cinzel-Bold",t.heading,primary and "f7ecd4" or "2a1d12")
+        width=math.max(width,b.label:GetUnboundedStringWidth()+16*t.unit)
+        height=math.max(height,t.heading*1.6+8*t.unit)
+        b:SetSize(width,height)
         paint(b.fill,theme.seal,primary and 1 or .04)
         local w,h=width,height
         for _,t in ipairs(b.edges) do paint(t,theme.seal,.65); t:ClearAllPoints() end
@@ -274,7 +281,7 @@ function View.New(callbacks)
         w:Show(); return w
     end
     local function arrangeControl(row,b,width,height)
-        local spec,s=row.spec,layout.scale
+        local spec,s=row.spec,t.unit
         b:SetSize(width,height)
         local enabled=spec.enabled or spec.kind=="text" and spec.readOnly and not spec.soon
         if spec.kind=="text" or spec.kind=="slider" then
@@ -301,18 +308,18 @@ function View.New(callbacks)
             anchor(b.fill,b,0,height/2,b:GetWidth()*(spec.value-d.min)/(d.max-d.min),2*s)
             paint(b.fill,theme.seal); paint(b.thumb,theme.secondary)
             b.thumb:SetSize(12*s,12*s)
-            anchor(b.output,b,b:GetWidth()+10*s,4*s,50*s,22*s)
-            font(b.output,"Cinzel-Regular",14*s,"2a1d12"); b.output:SetText(tostring(spec.value)..(spec.suffix or "")); b.output:SetJustifyH("RIGHT")
+            anchor(b.output,b,b:GetWidth()+10*s,4*s,50*s,math.max(22*s,t.heading*1.5))
+            font(b.output,"Cinzel-Regular",t.heading,"2a1d12"); b.output:SetText(tostring(spec.value)..(spec.suffix or "")); b.output:SetJustifyH("RIGHT")
         elseif spec.kind=="select" then
             local caption=""
             for _,choice in ipairs(spec.definition.values) do if choice.value==spec.value then caption=choice.text end end
-            font(b.label,"EBGaramond-Regular",17*s,"2a1d12"); b.label:SetText(caption)
+            font(b.label,"EBGaramond-Regular",t.body,"2a1d12"); b.label:SetText(caption)
             b.label:SetJustifyH("LEFT"); paint(b.fill,"70412a",0)
             b.arrow:ClearAllPoints(); b.arrow:SetPoint("RIGHT",b,"RIGHT",0,0); b.arrow:SetSize(22*s,22*s)
             for _,edge in ipairs(b.edges) do edge:Hide() end
             b.edges[2]:Show(); b.edges[2]:ClearAllPoints(); b.edges[2]:SetPoint("BOTTOMLEFT"); b.edges[2]:SetSize(width,s)
         elseif spec.kind=="text" then
-            font(b,"EBGaramond-Regular",16*s,"2a1d12"); b:SetMaxLetters(spec.definition.maxLength or 512)
+            font(b,"EBGaramond-Regular",t.body,"2a1d12"); b:SetMaxLetters(spec.definition.maxLength or 512)
             if not b:HasFocus() then b:SetText(tostring(spec.value or spec.placeholder or "")); b:SetCursorPosition(0) end
             b.line:SetHeight(s)
             if spec.soon and (spec.value==nil or spec.value=="") then b:SetText(spec.placeholder or "") end
@@ -322,14 +329,11 @@ function View.New(callbacks)
     local function render()
         local dimensions=addon.DiagnosticAPI.Dimensions(UIParent,root)
         layout=assert(addon.ConfigurationBook.Layout(dimensions.viewportWidth,dimensions.viewportHeight),"layout_unavailable")
+        t=addon.FontAPI.Scale(snapshot.textSize)
         local s=layout.scale; local w,h,lw,rw=layout.width,layout.height,layout.left,layout.right
         -- All sizes share a single readiness probe for each font file.
-        for _,request in ipairs({{"Cinzel-Bold",20},{"Cinzel-Bold",26},{"Cinzel-Bold",13.5},
-            {"Cinzel-Regular",13},{"Cinzel-Regular",14},{"Cinzel-Regular",18},
-            {"EBGaramond-Italic",12},{"EBGaramond-Italic",13},{"EBGaramond-Italic",13.5},{"EBGaramond-Italic",14},
-            {"EBGaramond-Regular",13.5},{"EBGaramond-Regular",14.5},{"EBGaramond-Regular",16},
-            {"EBGaramond-Regular",17},{"EBGaramond-Regular",17.5},{"EBGaramond-Regular",18}}) do
-            addon.FontAPI.Prepare(request[1],request[2]*s)
+        for _,file in ipairs({"Cinzel-Bold","Cinzel-Regular","EBGaramond-Italic","EBGaramond-Regular"}) do
+            addon.FontAPI.Prepare(file,t.body)
         end
         theme.seal=theme.seal or ({alliance="2d4f86",horde="7a2214",quelthalas="9e2a35",neutral="3f5a4c"})[theme.key]
         cover:SetSize(w,h)
@@ -348,15 +352,20 @@ function View.New(callbacks)
             anchor(ribbonTips[i*2],cover,14*s+lw+11*s-width,(70+i)*s,width,s)
             paint(ribbonTips[i*2-1],theme.seal); paint(ribbonTips[i*2],theme.seal)
         end
-        anchor(emblem,contents,42*s,42*s,40*s,40*s)
-        anchor(headings.brand,contents,94*s,40*s); text(headings.brand,"NerdWow","Cinzel-Bold",20*s,lw-100*s); ink(headings.brand,"2a1d12")
-        anchor(headings.subtitle,contents,94*s,67*s); text(headings.subtitle,"Configurações","EBGaramond-Italic",14*s,lw-100*s); ink(headings.subtitle,"5a4632")
-        anchor(rules[1],contents,42*s,105*s,(lw-70*s)/2-13*s,s)
-        anchor(rules[2],contents,42*s+(lw-70*s)/2+13*s,105*s,(lw-70*s)/2-13*s,s)
-        anchor(rules[3],contents,42*s+(lw-70*s)/2-3*s,102*s,6*s,6*s)
+        anchor(emblem,contents,42*s,42*s,40*t.unit,40*t.unit)
+        anchor(headings.brand,contents,94*s,40*s)
+        local brandHeight=text(headings.brand,"NerdWow","Cinzel-Bold",t.title,lw-100*s); ink(headings.brand,"2a1d12")
+        anchor(headings.subtitle,contents,94*s,40*s+brandHeight+4*t.unit)
+        local subHeight=text(headings.subtitle,"Configurações","EBGaramond-Italic",t.note,lw-100*s); ink(headings.subtitle,"5a4632")
+        local divider=40*s+brandHeight+subHeight+18*t.unit
+        anchor(rules[1],contents,42*s,divider,(lw-70*s)/2-13*s,s)
+        anchor(rules[2],contents,42*s+(lw-70*s)/2+13*s,divider,(lw-70*s)/2-13*s,s)
+        anchor(rules[3],contents,42*s+(lw-70*s)/2-3*s,divider-3*s,6*s,6*s)
         anchor(indexNote,contents,42*s,h-86*s)
-        text(indexNote,addon.Text.configIndexFoot,"EBGaramond-Italic",13*s,lw-52*s); ink(indexNote,"5a4632")
-        anchor(indexScroll,contents,34*s,125*s,lw-40*s,h-225*s); indexChild:SetWidth(lw-40*s)
+        local indexHeight=text(indexNote,addon.Text.configIndexFoot,"EBGaramond-Italic",t.note,lw-52*s); ink(indexNote,"5a4632")
+        local indexBottom=h-34*s-indexHeight
+        anchor(indexNote,contents,42*s,indexBottom)
+        anchor(indexScroll,contents,34*s,divider+20*s,lw-40*s,indexBottom-divider-34*s); indexChild:SetWidth(lw-40*s)
         local y=0
         for index,spec in ipairs(snapshot.chapters) do
             local b=nav[index]
@@ -367,19 +376,24 @@ function View.New(callbacks)
                 feedback(b)
             end
             b:Show(); anchor(b,indexChild,0,y)
-            local labelWidth=lw-90*s-(spec.soon and 55*s or 0)
-            anchor(b.number,b,9*s,9*s); text(b.number,spec.roman,"Cinzel-Regular",13*s,26*s); ink(b.number,theme.seal)
-            anchor(b.label,b,42*s,6*s)
-            local height=text(b.label,spec.title,"EBGaramond-Regular",18*s,labelWidth); ink(b.label,"2a1d12")
+            anchor(b.number,b,9*s,9*s)
+            font(b.number,"Cinzel-Regular",t.note)
+            b.number:SetText(spec.roman)
+            local numberWidth=math.ceil(b.number:GetUnboundedStringWidth()+2*t.unit)
+            local numberHeight=text(b.number,spec.roman,"Cinzel-Regular",t.note,numberWidth); ink(b.number,theme.seal)
+            local labelLeft=math.max(42*s,9*s+numberWidth+7*t.unit)
+            local labelWidth=lw-labelLeft-48*s-(spec.soon and 55*s or 0)
+            anchor(b.label,b,labelLeft,6*s)
+            local height=math.max(text(b.label,spec.title,"EBGaramond-Regular",t.body,labelWidth),numberHeight+3*s); ink(b.label,"2a1d12")
             local natural=b.label:GetUnboundedStringWidth()
             local dotCount=math.max(0,math.floor((labelWidth-natural-8*s)/(5*s)))
             for i=1,math.max(dotCount,#b.dots) do
                 local dot=b.dots[i]
                 if not dot then dot=solid(b,"70412a",.35); b.dots[i]=dot end
-                if i<=dotCount then dot:Show(); anchor(dot,b,42*s+natural+8*s+i*5*s,23*s,1.2*s,1.2*s) else dot:Hide() end
+                if i<=dotCount then dot:Show(); anchor(dot,b,labelLeft+natural+8*s+i*5*s,23*s,1.2*s,1.2*s) else dot:Hide() end
             end
             if spec.soon then
-                anchor(b.soon,b,lw-95*s,9*s); height=math.max(height,text(b.soon,"em breve","EBGaramond-Italic",12*s,50*s))
+                anchor(b.soon,b,lw-95*s,9*s); height=math.max(height,text(b.soon,"em breve","EBGaramond-Italic",t.note,50*s))
                 ink(b.soon,"6e5942"); b.soon:Show()
             else b.soon:Hide() end
             b:SetSize(lw-40*s,height+13*s)
@@ -401,10 +415,11 @@ function View.New(callbacks)
         local header=snapshot.header
         local chapterNumber=""
         for _,chapter in ipairs(snapshot.chapters) do if chapter.id==snapshot.chapter then chapterNumber=chapter.roman end end
-        text(headings.kicker,"Capítulo "..chapterNumber..(header.soon and " · em breve" or ""),"EBGaramond-Italic",14*s,width); ink(headings.kicker,theme.seal)
-        anchor(headings.title,contents,x,61*s); local th=text(headings.title,header.title,"Cinzel-Bold",26*s,width); ink(headings.title,"2a1d12")
-        anchor(headings.lead,contents,x,65*s+th); local lh=text(headings.lead,header.description,"EBGaramond-Regular",16*s,width); ink(headings.lead,"5a4632")
-        local top=77*s+th+lh
+        local kh=text(headings.kicker,"Capítulo "..chapterNumber..(header.soon and " · em breve" or ""),"EBGaramond-Italic",t.note,width); ink(headings.kicker,theme.seal)
+        local titleTop=40*s+kh+5*t.unit
+        anchor(headings.title,contents,x,titleTop); local th=text(headings.title,header.title,"Cinzel-Bold",t.title,width); ink(headings.title,"2a1d12")
+        anchor(headings.lead,contents,x,titleTop+th+4*t.unit); local lh=text(headings.lead,header.description,"EBGaramond-Regular",t.note,width); ink(headings.lead,"5a4632")
+        local top=titleTop+th+lh+16*t.unit
         anchor(optionScroll,contents,x,top,width,h-top-78*s); child:SetWidth(width)
         anchor(scrollTrack,contents,x+width+10*s,top,2*s,optionScroll:GetHeight()); scrollThumb:SetWidth(2*s)
         local y,index=4*s,1
@@ -421,9 +436,9 @@ function View.New(callbacks)
                     row.card=row.card or solid(row,"70412a",.06); row.card:SetAllPoints(); row.card:Show()
                     anchor(row,child,(column-1)*(cardWidth+10*s),y)
                     anchor(row.value,row,10*s,10*s)
-                    local vh=text(row.value,display(row.spec.value),"Cinzel-Regular",18*s,cardWidth-20*s); ink(row.value,"2a1d12")
+                    local vh=text(row.value,display(row.spec.value),"Cinzel-Regular",t.heading,cardWidth-20*s); ink(row.value,"2a1d12")
                     anchor(row.title,row,10*s,14*s+vh)
-                    local hh=text(row.title,row.spec.title,"EBGaramond-Regular",13.5*s,cardWidth-20*s); ink(row.title,"5a4632")
+                    local hh=text(row.title,row.spec.title,"EBGaramond-Regular",t.note,cardWidth-20*s); ink(row.title,"5a4632")
                     maxHeight=math.max(maxHeight,vh+hh+25*s); row:SetSize(cardWidth,vh+hh+25*s)
                 end
                 for column=1,count do
@@ -439,21 +454,21 @@ function View.New(callbacks)
                 local full=spec.fullWidth or spec.kind=="info" and not spec.description
                 local titleWidth=full and width or width-controlWidth-24*s
                 anchor(row.title,row,7*s,12*s)
-                local hh=text(row.title,spec.title..(spec.soon and " · em breve" or ""),"EBGaramond-Regular",17.5*s,titleWidth-7*s)
+                local hh=text(row.title,spec.title..(spec.soon and " · em breve" or ""),"EBGaramond-Regular",t.body,titleWidth-7*s)
                 ink(row.title,"2a1d12",spec.soon and .55 or 1)
                 anchor(row.description,row,7*s,16*s+hh)
-                local dh=text(row.description,spec.description or "","EBGaramond-Regular",14.5*s,titleWidth-7*s)
+                local dh=text(row.description,spec.description or "","EBGaramond-Regular",t.note,titleWidth-7*s)
                 ink(row.description,"5a4632",spec.soon and .55 or 1)
                 local height=hh+(spec.description and dh+4*s or 0)+24*s
                 if spec.kind=="info" then
                     anchor(row.value,row,full and 0 or width-controlWidth,full and height-8*s or 12*s)
-                    local vh=text(row.value,display(spec.value),"EBGaramond-Regular",16*s,full and width or controlWidth)
+                    local vh=text(row.value,display(spec.value),"EBGaramond-Regular",t.body,full and width or controlWidth)
                     ink(row.value,"5a4632"); height=full and height+vh+5*s or math.max(height,vh+24*s)
                 elseif b then
                     local by=full and height-8*s or math.max(12*s,(height-30*s)/2)
                     anchor(b,row,full and 0 or width-controlWidth,by)
                     arrangeControl(row,b,full and width or controlWidth,30*s)
-                    height=math.max(height,by+42*s)
+                    height=math.max(height,by+b:GetHeight()+12*s)
                 end
                 row:SetSize(width,height); row.RefreshFeedback(); y=y+height; index=index+1
             end
@@ -461,18 +476,25 @@ function View.New(callbacks)
         for i=#snapshot.options+1,#rows do rows[i]:Hide() end
         child:SetHeight(y+10*s); optionScroll:UpdateScrollChildRect()
         optionScroll:SetVerticalScroll(math.min(optionScroll:GetVerticalScroll(),optionScroll:GetVerticalScrollRange())); scrollbar()
-        anchor(footer,contents,14*s+lw,h-70*s,rw,56*s); footerRule:SetHeight(s)
+        formatButton(close,"Fechar",74*s,33*s,true)
+        formatButton(restore,"Restaurar padrões",176*s,33*s,false)
+        local restoreLeft=rw-34*s-close:GetWidth()-12*t.unit-restore:GetWidth()
         anchor(saved,footer,34*s,20*s)
-        text(saved,addon.Text.configSaved,"EBGaramond-Italic",13.5*s,width-270*s); ink(saved,"5a4632")
-        formatButton(restore,"Restaurar padrões",176*s,33*s,false); anchor(restore,footer,rw-34*s-260*s,14*s)
-        formatButton(close,"Fechar",74*s,33*s,true); anchor(close,footer,rw-34*s-74*s,14*s)
+        local savedHeight=text(saved,addon.Text.configSaved,"EBGaramond-Italic",t.note,math.max(t.body*4,restoreLeft-46*s)); ink(saved,"5a4632")
+        local footerHeight=math.max(56*s,close:GetHeight()+28*s,restore:GetHeight()+28*s,savedHeight+20*s)
+        anchor(footer,contents,14*s+lw,h-14*s-footerHeight,rw,footerHeight); footerRule:SetHeight(s)
+        anchor(saved,footer,34*s,(footerHeight-savedHeight)/2)
+        anchor(restore,footer,restoreLeft,(footerHeight-restore:GetHeight())/2)
+        anchor(close,footer,rw-34*s-close:GetWidth(),(footerHeight-close:GetHeight())/2)
+        optionScroll:SetHeight(h-top-footerHeight-22*s); optionScroll:UpdateScrollChildRect()
+        scrollTrack:SetHeight(optionScroll:GetHeight()); scrollbar()
         formatButton(xClose,"×",28*s,28*s,false); anchor(xClose,contents,w-42*s,22*s)
-        font(xClose.label,"Cinzel-Regular",18*s,"5a4632")
+        font(xClose.label,"Cinzel-Regular",t.heading,"5a4632")
         for _,edge in ipairs(xClose.edges) do edge:Hide() end; xClose.fill:SetAlpha(0)
         confirm:Show(); confirm:SetAlpha(0) -- shown at alpha zero so native metrics exist.
         confirmPaper:SetSize(480*s,210*s); confirmPaper:ClearAllPoints(); confirmPaper:SetPoint("CENTER",cover,"CENTER",0,0)
-        anchor(confirmTitle,confirmPaper,26*s,22*s); text(confirmTitle,"Restaurar padrões?","Cinzel-Bold",20*s,428*s); ink(confirmTitle,"2a1d12")
-        anchor(confirmText,confirmPaper,26*s,60*s); text(confirmText,addon.Text.configResetText,"EBGaramond-Regular",17*s,428*s); ink(confirmText,"5a4632")
+        anchor(confirmTitle,confirmPaper,26*s,22*s); text(confirmTitle,"Restaurar padrões?","Cinzel-Bold",t.title,428*s); ink(confirmTitle,"2a1d12")
+        anchor(confirmText,confirmPaper,26*s,60*s); text(confirmText,addon.Text.configResetText,"EBGaramond-Regular",t.body,428*s); ink(confirmText,"5a4632")
         formatButton(accept,"Restaurar",150*s,34*s,true); anchor(accept,confirmPaper,26*s,150*s)
         formatButton(cancel,"Cancelar",130*s,34*s,false); anchor(cancel,confirmPaper,190*s,150*s)
         confirm:SetAlpha(1); if not confirmation then confirm:Hide() end

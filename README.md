@@ -93,6 +93,8 @@ Abra o livro com `/nerdwow config`, pelo botão direito no minimapa ou em **Opç
 
 No livro, você pode mostrar ou ocultar o botão, escolher um tema automático ou fixo, ligar o cinema, ajustar a velocidade da fala e desligar os atalhos **1–9**. **Espaço**, **Esc** e os cliques continuam funcionando. As mudanças valem na hora, inclusive na conversa e no pergaminho já abertos.
 
+Em **Geral → Tamanho do texto**, ajuste de **80% a 140%**, em passos de 5%. A escala comum mantém a leitura proporcional entre conversa, pergaminho e livro, considerando a altura física da tela e a escala de interface. O padrão é **100%** e faz parte de **Restaurar padrões**.
+
 O capítulo **Diário** mostra os eventos e permite sincronizar com a confirmação existente. **Avançado** mostra os diagnósticos e o teste de fontes; **Sobre** traz a versão e um endereço selecionável do GitHub para copiar com **Ctrl+C**. As opções marcadas **em breve** ficam desativadas.
 
 **Restaurar padrões** pede confirmação e preserva o diário e a posição do botão. As preferências são salvas automaticamente pelo addon em memória; o jogo grava o arquivo ao sincronizar, usar `/reload` ou sair normalmente.

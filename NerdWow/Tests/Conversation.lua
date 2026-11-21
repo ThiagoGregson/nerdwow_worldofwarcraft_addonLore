@@ -174,7 +174,7 @@ test("layout mantém proporções e texto legível em resoluções e escalas dif
     local c=core().Conversation
     for _, dimensions in ipairs({{1280,720},{1920,1080},{2560,1440},{3440,1440},{1366/.8,768/.8}}) do
         local layout=assert(c.Layout(dimensions[1],dimensions[2]))
-        assert(layout.speechSize>=22); assert(layout.contentWidth<dimensions[1])
+        assert(layout.speechSize>=13); assert(layout.contentWidth<dimensions[1])
         equal(layout.top,dimensions[2]*.09); assert(layout.maximumBottom<=dimensions[2]*.5)
     end
     equal(c.Layout(0,720),nil); equal(c.Layout(math.huge,720),nil)
@@ -373,6 +373,9 @@ local function renderer(n,asynchronous)
     make=function(kind,parent)
         local f={kind=kind,parent=parent,shown=true,scripts={},alpha=1}
         function f:GetObjectType() return self.kind end
+        function f:GetEffectiveScale()
+            return (state.uiScale or 1)*768/(state.parent:GetHeight()*(state.uiScale or 1))
+        end
         function f:SetSize(w,h) self.width,self.height=w,h end
         function f:SetWidth(w) self.width=w end
         function f:SetHeight(h) self.height=h end
@@ -563,6 +566,7 @@ local function renderer(n,asynchronous)
         pcall=pcall,error=error,assert=assert,UIParent=parent,GameFontNormal={},xpcall=xpcall,unpack=unpack,select=select,setmetatable=setmetatable,table=table,
         debugstack=function() return debug.traceback("stack",2) end,
         CreateColor=function(...) local color={...}; color.kind="Color"; return color end,
+        GetPhysicalScreenSize=function() return parent:GetWidth()*(state.uiScale or 1),parent:GetHeight()*(state.uiScale or 1) end,
         CreateFrame=function(kind,_,frameParent)
             local frame=make(kind,frameParent); state.frames[#state.frames+1]=frame; return frame
         end}
@@ -740,7 +744,7 @@ test("número e círculo seguem proporção do mockup com centros comuns em esca
             if region.text=="4" then number=region end
             if region.text=="Conte-me sua história." then label=region end
         end
-        assert(number and label); equal(number.size,label.size*.78); equal(number.width,number.size*1.6)
+        assert(number and label); equal(number.size,n.FontAPI.Scale().note); equal(number.width,number.size*1.6)
         equal(number.height,number.width); equal(number.justifyH,"CENTER"); equal(number.justifyV,"MIDDLE")
         local anchor=number.points[1]; equal(anchor[1],"CENTER"); equal(anchor[3],"CENTER")
         equal(anchor[2].width,number.width); equal(anchor[2].height,number.height)
@@ -1147,7 +1151,7 @@ test("coluna medida tem setenta e dois caracteres e independe da proporção e e
         for _,uiScale in ipairs({.64,.8,1,1.25}) do
             local width,height=size[1]/uiScale,size[2]/uiScale
             local base=assert(c.Layout(width,height))
-            local measured=72*base.speechSize*.45
+            local measured=72*base.typography.body*.45
             local layout=assert(c.Layout(width,height,measured))
             equal(layout.textWidth,measured); equal(layout.textLeft+layout.textWidth/2,width/2)
             equal(layout.maximumBottom,height*.38)
@@ -1207,8 +1211,13 @@ test("nome longo não quebra e fala respeita cabeçalho nas quatro resoluções 
                     if region.text==source.npc.title then titleLabel=region end
                 end
             end
-            assert(nameLabel and titleLabel); equal(nameLabel.wrap,false); equal(nameLabel.nonSpaceWrap,false)
-            assert(nameLabel.size>=14*(size[2]/uiScale/720))
+            local details={}
+            for _,region in ipairs(r.regions) do
+                if region.text and region.text:find("Guardi",1,true) then details[#details+1]=region.text..":"..tostring(region.size)..":"..tostring(region.width) end
+            end
+            assert(nameLabel and titleLabel,tostring(size[1]).."/"..uiScale.." "..table.concat(details," / "))
+            equal(nameLabel.wrap,false); equal(nameLabel.nonSpaceWrap,false)
+            assert(nameLabel.size>=n.FontAPI.Scale().minimum)
             local speechScroll=r.frames[2]
             local headerTop=nameLabel.points[1][5]
             assert(speechScroll.points[1][5]<=headerTop-nameLabel.height)
@@ -1263,10 +1272,10 @@ test("medidor mostrado e fallback de métricas zero mantêm opções completas c
         end
         assert(measure and measure.shown and measure.points[1])
         assert(optionLabel and numberLabel)
-        equal(optionLabel.text,source.options[1].text); assert(optionLabel.width>500)
+        equal(optionLabel.text,source.options[1].text); assert(optionLabel.width>n.FontAPI.Scale().body*20)
         assert(optionLabel.height>optionLabel.size*1.4)
         assert(optionLabel.parent.height>=optionLabel.height+8)
-        equal(numberLabel.width,18*.78*1.6); equal(numberLabel.height,numberLabel.width)
+        equal(numberLabel.width,n.FontAPI.Scale().note*1.6); equal(numberLabel.height,numberLabel.width)
         equal(optionLabel.parent.parent,r.frames[5])
     end
 end)

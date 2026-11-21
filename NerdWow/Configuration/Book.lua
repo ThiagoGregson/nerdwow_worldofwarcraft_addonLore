@@ -33,7 +33,7 @@ function Book.New(options)
         return not spec.soon and not spec.readOnly and (not spec.protected or options.CanAct())
     end
     function book.Snapshot()
-        local result={chapters=r.Chapters(),chapter=chapter,options={}}
+        local result={chapters=r.Chapters(),chapter=chapter,options={},textSize=settings.Read("textSize")}
         for index,spec in ipairs(result.chapters) do spec.roman=Book.Roman(index); if spec.id==chapter then result.header=spec end end
         for _,spec in ipairs(r.Options(chapter)) do
             if not spec.visibleWhen or options.IsVisible(spec.visibleWhen) then

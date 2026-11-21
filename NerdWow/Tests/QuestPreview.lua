@@ -12,8 +12,11 @@ local function anchor(point,w,h)
     return point:find("RIGHT",1,true) and w or point:find("LEFT",1,true) and 0 or w/2,
         point:find("TOP",1,true) and h or point:find("BOTTOM",1,true) and 0 or h/2
 end
+local drawing=0
 local function draw(s)
+    drawing=drawing+1
     local r=s.r
+    local viewportWidth,viewportHeight=r.parent:GetWidth(),r.parent:GetHeight()
     local bounds={}
     local function rect(object)
         if bounds[object] then return bounds[object] end
@@ -46,7 +49,7 @@ local function draw(s)
         local object=entry.region
         local alpha=object.alpha or 1
         local ancestor=object
-        local clip={x=0,y=0,w=1280,h=720}
+        local clip={x=0,y=0,w=viewportWidth,h=viewportHeight}
         while ancestor do
             if ancestor~=object then alpha=alpha*(ancestor.alpha or 1) end
             if not ancestor.shown then alpha=0; break end
@@ -59,10 +62,10 @@ local function draw(s)
             ancestor=ancestor.parent
         end
         if alpha>.001 and clip.w>0 and clip.h>0 then
-            local b=rect(object); local y=720-b.y-b.h
-            local id=s.source.moment.."r"..entry.index
+            local b=rect(object); local y=viewportHeight-b.y-b.h
+            local id="scene"..drawing.."r"..entry.index
             defs[#defs+1]=string.format('<clipPath id="%s"><rect x="%g" y="%g" width="%g" height="%g"/></clipPath>',
-                id,clip.x,720-clip.y-clip.h,clip.w,clip.h)
+                id,clip.x,viewportHeight-clip.y-clip.h,clip.w,clip.h)
             local shape
             if (object.kind=="FontString" or object.kind=="EditBox") and object.text and object.text~="" then
                 local family=(object.font or ""):match("([^\\]+)%.ttf$") or "EBGaramond-Regular"
@@ -92,7 +95,8 @@ local function draw(s)
             if shape then output[#output+1]=string.format('<g clip-path="url(#%s)" opacity="%g">%s</g>',id,alpha,shape) end
         end
     end
-    return '<svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg"><defs>'..table.concat(defs)..'</defs><rect width="1280" height="720" fill="#24352d"/><path d="M0 520L220 250 420 500 800 190 1280 440V720H0Z" fill="#182820"/>'..table.concat(output)..'</svg>'
+    return string.format('<svg viewBox="0 0 %g %g" xmlns="http://www.w3.org/2000/svg"><defs>',viewportWidth,viewportHeight)
+        ..table.concat(defs)..string.format('</defs><rect width="%g" height="%g" fill="#24352d"/>',viewportWidth,viewportHeight)..table.concat(output)..'</svg>'
 end
 local styles={}
 for _,name in ipairs({"Cinzel-Regular","Cinzel-Bold","EBGaramond-Regular","EBGaramond-Italic"}) do
@@ -146,6 +150,24 @@ end
 html[#html+1]='</main></html>'
 if configuration then
     table.remove(html)
+    for _,percent in ipairs({80,100,140}) do
+        for _,kind in ipairs({"Conversa","Pergaminho","Livro"}) do
+            local s=kind=="Conversa" and fixtures.conversationScene() or kind=="Pergaminho" and fixtures.scene("COMPLETE") or configuration.scene()
+            s.r.uiScale=.8; s.r.parent:SetSize(3440/.8,1440/.8)
+            if kind=="Conversa" then
+                local input=assert(s.n.Conversation.Build(s.source)); s.n.Conversation.Configure(input,{textSize=percent})
+                assert(s.view.Show(input)); s.view.Complete(); s.r.frames[1].scripts.OnUpdate(s.r.frames[1],1)
+            elseif kind=="Pergaminho" then
+                s.preferences={textSize=percent}; s.source.quest.title="PROCURA-SE: Tiago Ciríaco"
+                s.source.quest.rewardText='Hum... Eu já tinha ouvido falar desse "Coletor", mas não sei para quem ele trabalha. Obrigado por trazer essa escala para mim. Ela nos ajudará a resolver esse mistério.'
+                s.c.Refresh(); s.c.Complete(); s.c.Choose(2); s.root().scripts.OnUpdate(s.root(),1)
+            else
+                s.source={moment="TYPEBOOK"..percent}; s.version=configuration.version
+                s.settings.Set("textSize",percent); s.open()
+            end
+            html[#html+1]='<h2>Tipografia · '..kind..' · '..percent..'% · 3440x1440</h2>'..draw(s)
+        end
+    end
     for _,chapter in ipairs({"Geral","Diálogo","Câmera e interface","Personagem","Diário","Avançado","Sobre"}) do
         local s=configuration.scene(); s.version=configuration.version; s.source={moment="BOOK"..#html}
         s.diagnostics={{lastTimestamp=1,code="interface_error",count=2,version="0.7.2",message="Exemplo de diagnóstico: fonte indisponível durante a apresentação.",context={stage="show"}}}

@@ -7,17 +7,14 @@ local ART={paperAtlas="QuestBG-Parchment",circle="Interface\\CHARACTERFRAME\\Tem
     coins={"Interface\\MoneyFrame\\UI-GoldIcon","Interface\\MoneyFrame\\UI-SilverIcon","Interface\\MoneyFrame\\UI-CopperIcon"}}
 local QUALITY={"9d9d9d","ffffff","1eff00","0070dd","a335ee","ff8000","e6cc80","00ccff","00ccff"}
 local SEAL={alliance="2d4f86",horde="7a2214",quelthalas="9e2a35",neutral="3f5a4c"}
-local function prepare(scale)
-    for _,spec in ipairs({{"Cinzel-Bold",27},{"Cinzel-Bold",15},{"Cinzel-Bold",48},
-        {"EBGaramond-Regular",17},{"EBGaramond-Regular",14},{"EBGaramond-Regular",16},{"EBGaramond-Regular",15},
-        {"EBGaramond-Italic",12},{"EBGaramond-Italic",11},{"Cinzel-Regular",12},
-        {"Cinzel-Bold",14},{"Cinzel-Bold",11},{"EBGaramond-Regular",12}}) do
-        addon.FontAPI.Prepare(spec[1],spec[2]*scale)
+local function prepare(typography)
+    for _,file in ipairs({"Cinzel-Bold","EBGaramond-Regular","EBGaramond-Italic","Cinzel-Regular"}) do
+        addon.FontAPI.Prepare(file,typography.body)
     end
 end
 function View.Preload(width,height)
     local layout=addon.QuestPresentation.Layout(width,height)
-    if layout then prepare(layout.scale) end
+    if layout then prepare(addon.FontAPI.Scale()) end
 end
 local function rgb(hex)
     return tonumber(hex:sub(1,2),16)/255,tonumber(hex:sub(3,4),16)/255,tonumber(hex:sub(5,6),16)/255
@@ -38,7 +35,7 @@ end
 function View.New(parent,options)
     local q,labels,items,actions,markers,coins={},{},{},{},{},{}
     local model,layout,elapsed,selected,active=nil,nil,0,nil,false
-    local contentHeight=1
+    local contentHeight,t=1,nil
     local labelIndex,itemIndex=0,0
     local root=CreateFrame("Frame",nil,parent); root:Hide(); root:EnableMouse(false)
     local clip=CreateFrame("ScrollFrame",nil,root)
@@ -121,14 +118,14 @@ function View.New(parent,options)
         if not object then object=makeLabel(child); labels[labelIndex]=object end
         object:SetWordWrap(true); object:SetNonSpaceWrap(true)
         object:ClearAllPoints(); object:SetPoint("TOPLEFT",child,"TOPLEFT",x,-y)
-        font(object,file,size,hex,alpha); object:SetSpacing(3*layout.scale)
+        font(object,file,size,hex,alpha); object:SetSpacing(t.gap)
         local height=options.Height(object,value,file,size,width)
         -- The shared measuring helper sets the cinematic shadow; ink has none.
         object:SetShadowOffset(0,0)
         return height,object
     end
     local function section(value,y,width)
-        local height=text(value,"Cinzel-Bold",15*layout.scale,0,y,width,SEAL[model.theme.key])
+        local height=text(value,"Cinzel-Bold",t.heading,0,y,width,SEAL[model.theme.key])
         return y+height+7*layout.scale
     end
     local function itemRow(index)
@@ -147,8 +144,9 @@ function View.New(parent,options)
     end
     local function placeItems(list,kind,y,width,choose)
         local s=layout.scale
+        local u=t.unit
         local sr,sg,sb=rgb(SEAL[model.theme.key])
-        local columns=width>=340*s and 2 or 1
+        local columns=width>=340*u and 2 or 1
         local cardWidth=(width-(columns-1)*9*s)/columns
         local rowHeight,column=0,0
         for position,item in ipairs(list) do
@@ -157,34 +155,34 @@ function View.New(parent,options)
             b.light:SetColorTexture(sr,sg,sb,.14)
             for _,edge in ipairs(b.edges) do edge:SetColorTexture(sr,sg,sb,.85) end
             b:Show(); b:ClearAllPoints(); b:SetPoint("TOPLEFT",child,"TOPLEFT",column*(cardWidth+9*s),-y)
-            b.name:ClearAllPoints(); b.name:SetPoint("TOPLEFT",b,"TOPLEFT",47*s,-8*s)
+            b.name:ClearAllPoints(); b.name:SetPoint("TOPLEFT",b,"TOPLEFT",47*u,-8*u)
             local quality=QUALITY[(item.quality or 1)+1] or "ffffff"
             local r,g,blue=rgb(quality)
-            font(b.name,"EBGaramond-Regular",14*s)
+            font(b.name,"EBGaramond-Regular",t.body)
             b.name:SetTextColor(r*.52,g*.52,blue*.52,1)
-            local height=options.Height(b.name,item.name or addon.Text.questUnknownItem,"EBGaramond-Regular",14*s,cardWidth-57*s)
+            local height=options.Height(b.name,item.name or addon.Text.questUnknownItem,"EBGaramond-Regular",t.body,cardWidth-57*u)
             b.name:SetShadowOffset(0,0)
             local count=addon.QuestPresentation.ItemCount(item,kind=="required")
-            b.count:ClearAllPoints(); b.count:SetPoint("TOPLEFT",b,"TOPLEFT",47*s,-8*s-height)
-            font(b.count,"EBGaramond-Regular",12*s,"6e5942")
+            b.count:ClearAllPoints(); b.count:SetPoint("TOPLEFT",b,"TOPLEFT",47*u,-8*u-height)
+            font(b.count,"EBGaramond-Regular",t.note,"6e5942")
             if count~="" then
-                height=height+options.Height(b.count,count,"EBGaramond-Regular",12*s,cardWidth-57*s)
+                height=height+options.Height(b.count,count,"EBGaramond-Regular",t.note,cardWidth-57*u)
                 b.count:SetShadowOffset(0,0)
             else b.count:SetText("") end
-            b:SetSize(cardWidth,math.max(48*s,height+16*s))
-            b.border:ClearAllPoints(); b.border:SetPoint("TOPLEFT",b,"TOPLEFT",6*s,-7*s); b.border:SetSize(34*s,34*s)
+            b:SetSize(cardWidth,math.max(48*u,height+16*u))
+            b.border:ClearAllPoints(); b.border:SetPoint("TOPLEFT",b,"TOPLEFT",6*u,-7*u); b.border:SetSize(34*u,34*u)
             b.border:SetColorTexture(r,g,blue,.95)
-            b.icon:ClearAllPoints(); b.icon:SetPoint("CENTER",b.border,"CENTER",0,0); b.icon:SetSize(31*s,31*s)
+            b.icon:ClearAllPoints(); b.icon:SetPoint("CENTER",b.border,"CENTER",0,0); b.icon:SetSize(31*u,31*u)
             b.icon:SetTexture(item.icon or ART.unknownItem)
             b.icon:SetTexCoord(.06,.94,.06,.94)
-            font(b.quantity,"EBGaramond-Regular",12*s,"ffffff")
+            font(b.quantity,"EBGaramond-Regular",t.note,"ffffff")
             b.quantity:SetShadowOffset(1,-1)
             b.quantity:ClearAllPoints(); b.quantity:SetPoint("BOTTOMRIGHT",b.icon,"BOTTOMRIGHT",-1*s,1*s)
-            b.quantity:SetSize(30*s,16*s); b.quantity:SetJustifyH("RIGHT")
+            b.quantity:SetSize(30*u,t.note*1.6); b.quantity:SetJustifyH("RIGHT")
             b.quantity:SetText(item.quantity and item.quantity>1 and tostring(item.quantity) or "")
-            font(b.number,"Cinzel-Bold",11*s,"2a1d12")
+            font(b.number,"Cinzel-Bold",t.note,"2a1d12")
             b.number:ClearAllPoints(); b.number:SetPoint("TOPLEFT",b,"TOPLEFT",5*s,7*s)
-            b.number:SetSize(26*s,17*s); b.number:SetText(choose and tostring(position) or "")
+            b.number:SetSize(26*u,t.note*1.6); b.number:SetText(choose and tostring(position) or "")
             b.number:SetWordWrap(false)
             local token=options.Callbacks()
             b:SetScript("OnClick",options.Safe(function()
@@ -223,9 +221,9 @@ function View.New(parent,options)
             local r,g,blue=rgb(SEAL[model.theme.key])
             b.fill:SetColorTexture(r,g,blue,spec.ghost and .09 or 1)
             b:Show(); b:SetSize(math.min(210*s,(layout.paperWidth-78*s-12*s)/#specs),35*s)
-            font(b.label,"Cinzel-Bold",14*s,spec.ghost and "352416" or "f7ecd4")
+            font(b.label,"Cinzel-Bold",t.heading,spec.ghost and "352416" or "f7ecd4")
             b.label:SetWordWrap(true)
-            local height=options.Height(b.label,spec.text,"Cinzel-Bold",14*s,b:GetWidth()-8*s)
+            local height=options.Height(b.label,spec.text,"Cinzel-Bold",t.heading,b:GetWidth()-8*s)
             b.label:SetShadowOffset(0,0); buttonHeight=math.max(buttonHeight,height+8*s)
             b.allowed=spec.enabled; b:SetEnabled(spec.enabled); b:SetAlpha(spec.enabled and 1 or .4)
             local token=options.Callbacks()
@@ -244,10 +242,10 @@ function View.New(parent,options)
         end
         local width=layout.paperWidth-78*s
         local noteText=addon.QuestPresentation.Note(model)
-        font(note,"EBGaramond-Italic",11*s,"786148"); note:SetWordWrap(true)
-        local noteHeight=16*s
+        font(note,"EBGaramond-Italic",t.note,"786148"); note:SetWordWrap(true)
+        local noteHeight=t.note*1.6
         if noteText~="" then
-            noteHeight=math.max(noteHeight,options.Height(note,noteText,"EBGaramond-Italic",11*s,width-19*s))
+            noteHeight=math.max(noteHeight,options.Height(note,noteText,"EBGaramond-Italic",t.note,width-19*s))
             note:SetShadowOffset(0,0)
         else note:SetText(""); note:SetSize(width-19*s,noteHeight) end
         local buttonBottom=math.max(29*s,9*s+noteHeight+4*s)
@@ -274,7 +272,7 @@ function View.New(parent,options)
     end
     local function resize()
         local s=layout.scale
-        local reserved=29*s+24*s+footer:GetHeight()
+        local reserved=29*s+math.max(24*s,t.note*1.8)+footer:GetHeight()
         layout.paperHeight=addon.QuestPresentation.PaperHeight(layout,contentHeight,reserved)
         root:SetHeight(layout.paperHeight); paper:SetHeight(layout.paperHeight)
         shadeLeft:SetHeight(layout.paperHeight); shadeRight:SetHeight(layout.paperHeight)
@@ -287,8 +285,10 @@ function View.New(parent,options)
     q.Prepare=prepare
     function q.Place(input,newLayout)
         model,layout=input,newLayout; selected=model.selected; active=true
+        t=layout.typography
         local s=layout.scale
-        q.Prepare(s)
+        local u=t.unit
+        q.Prepare(t)
         root:Show(); root:ClearAllPoints(); root:SetPoint("TOPLEFT",parent,"TOPLEFT",layout.paperLeft,-layout.paperTop)
         root:SetSize(layout.paperWidth,layout.paperHeight)
         clip:ClearAllPoints(); clip:SetPoint("TOPLEFT",root,"TOPLEFT",0,0); clip:SetWidth(layout.paperWidth)
@@ -298,6 +298,7 @@ function View.New(parent,options)
         shadeTop:SetSize(layout.paperWidth,24*s); shadeTop:SetPoint("TOPLEFT",paper,"TOPLEFT",0,0)
         shadeBottom:SetSize(layout.paperWidth,24*s); shadeBottom:SetPoint("BOTTOMLEFT",paper,"BOTTOMLEFT",0,0)
         local width=layout.paperWidth-78*s
+        local proseWidth=math.min(width,options.Width(addon.Conversation.LINE_SAMPLE,"EBGaramond-Regular",t.body))
         footer:ClearAllPoints(); footer:SetPoint("BOTTOMLEFT",paper,"BOTTOMLEFT",0,0)
         footer:SetSize(layout.paperWidth,87*s); footerRule:SetHeight(1*s)
         scroll:ClearAllPoints(); scroll:SetPoint("TOPLEFT",paper,"TOPLEFT",39*s,-29*s)
@@ -320,20 +321,20 @@ function View.New(parent,options)
         local r,g,b=rgb(sealHex)
         for _,object in ipairs({ruleLeft,ruleRight,diamond}) do object:SetColorTexture(r,g,b,.55) end
         for _,object in ipairs({sealInner,sealCenter}) do object:SetVertexColor(r,g,b,1) end
-        sealOuter:SetPoint("TOPRIGHT",root,"TOPRIGHT",-24*s,-7*s); sealOuter:SetSize(57*s,57*s)
-        sealInner:SetPoint("CENTER",sealOuter,"CENTER",0,1*s); sealInner:SetSize(53*s,53*s)
-        sealRim:SetPoint("CENTER",sealOuter,"CENTER",0,1*s); sealRim:SetSize(41*s,41*s)
-        sealCenter:SetPoint("CENTER",sealOuter,"CENTER",0,1*s); sealCenter:SetSize(37*s,37*s)
+        sealOuter:SetPoint("TOPRIGHT",root,"TOPRIGHT",-24*s,-7*s); sealOuter:SetSize(57*u,57*u)
+        sealInner:SetPoint("CENTER",sealOuter,"CENTER",0,1*u); sealInner:SetSize(53*u,53*u)
+        sealRim:SetPoint("CENTER",sealOuter,"CENTER",0,1*u); sealRim:SetSize(41*u,41*u)
+        sealCenter:SetPoint("CENTER",sealOuter,"CENTER",0,1*u); sealCenter:SetSize(37*u,37*u)
         sealCrest:SetTexture(model.theme.crest); sealCrest:SetPoint("CENTER",sealOuter,"CENTER",0,1*s)
-        sealCrest:SetSize(25*s,25*s); sealCrest:SetVertexColor(.95,.83,.57,.9)
+        sealCrest:SetSize(25*u,25*u); sealCrest:SetVertexColor(.95,.83,.57,.9)
         labelIndex,itemIndex=0,0
         local y=0
-        y=y+text(model.paper.kind or addon.Text.questKinds[model.moment],"EBGaramond-Italic",12*s,0,y,width-45*s,sealHex)+4*s
+        y=y+text(model.paper.kind or addon.Text.questKinds[model.moment],"EBGaramond-Italic",t.note,0,y,width-45*s,sealHex)+4*s
         if model.npc then
             local byline=(model.npc.name or "")..(model.npc.title and " · "..model.npc.title or "")
-            if byline~="" then y=y+text(byline,"EBGaramond-Italic",12*s,0,y,width,"6e5942")+5*s end
+            if byline~="" then y=y+text(byline,"EBGaramond-Italic",t.note,0,y,width,"6e5942")+5*s end
         end
-        y=y+text(model.paper.title,"Cinzel-Bold",27*s,0,y,width,"352416")+11*s
+        y=y+text(model.paper.title,"Cinzel-Bold",t.title,0,y,width,"352416")+11*s
         for _,object in ipairs({ruleLeft,ruleRight,diamond}) do object:Show(); object:ClearAllPoints() end
         ruleLeft:SetPoint("TOPLEFT",child,"TOPLEFT",0,-y); ruleLeft:SetSize(width/2-15*s,1*s)
         ruleRight:SetPoint("TOPRIGHT",child,"TOPRIGHT",0,-y); ruleRight:SetSize(width/2-15*s,1*s)
@@ -342,14 +343,14 @@ function View.New(parent,options)
         for index,part in ipairs(addon.Conversation.Paragraphs(model.paper.text)) do
             local drop,rest=nil,part.text
             if index==1 then drop,rest=addon.QuestPresentation.Drop(part.text) end
-            local dropWidth=drop and options.Width(drop,"Cinzel-Bold",48*s,true)
+            local dropWidth=drop and options.Width(drop,"Cinzel-Bold",t.initial,true)
             local capWidth=type(dropWidth)=="number" and dropWidth>0 and dropWidth<math.huge
-                and math.max(41*s,math.ceil(dropWidth+4*s)) or nil
-            local inset=capWidth and capWidth+7*s
-            if inset and (inset>width*.35 or width-inset<170*s) then inset=nil end
+                and math.max(t.initial*.8,math.ceil(dropWidth+4*u)) or nil
+            local inset=capWidth and capWidth+7*u
+            if inset and (inset>proseWidth*.35 or proseWidth-inset<170*u) then inset=nil end
             if inset then
                 local before=labelIndex
-                local _,dropObject=text(drop,"Cinzel-Bold",48*s,0,y,capWidth,sealHex)
+                local _,dropObject=text(drop,"Cinzel-Bold",t.initial,0,y,capWidth,sealHex)
                 dropObject:SetWordWrap(false); dropObject:SetNonSpaceWrap(false)
                 local ok,actual=pcall(dropObject.GetUnboundedStringWidth,dropObject)
                 if not ok or issecretvalue and issecretvalue(actual)
@@ -362,25 +363,25 @@ function View.New(parent,options)
                 while position<=#rest do
                     local _,finish=rest:find("%S+%s*",position)
                     if not finish then break end
-                    if options.Width(rest:sub(lineStart,finish),"EBGaramond-Regular",17*s)>width-inset then
+                    if options.Width(rest:sub(lineStart,finish),"EBGaramond-Regular",t.body)>proseWidth-inset then
                         if lines==2 then split=position-1; break end
                         lines=lines+1; lineStart=position
                     end
                     position=finish+1
                 end
                 local dropObject=labels[labelIndex]
-                local headHeight=text(rest:sub(1,split),"EBGaramond-Regular",17*s,inset,y,width-inset)
-                local capHeight=math.max(52*s,dropObject:GetStringHeight()+2*s,headHeight)
+                local headHeight=text(rest:sub(1,split),"EBGaramond-Regular",t.body,inset,y,proseWidth-inset)
+                local capHeight=math.max(t.line*2,dropObject:GetStringHeight()+2*u,headHeight)
                 dropObject:SetHeight(capHeight)
                 y=y+capHeight
-                if split<#rest then y=y+text(rest:sub(split+1),"EBGaramond-Regular",17*s,0,y,width) end
-            else y=y+text(part.text,"EBGaramond-Regular",17*s,0,y,width) end
+                if split<#rest then y=y+text(rest:sub(split+1),"EBGaramond-Regular",t.body,0,y,proseWidth) end
+            else y=y+text(part.text,"EBGaramond-Regular",t.body,0,y,proseWidth) end
             y=y+13*s
         end
         if model.paper.objectiveText and model.paper.objectiveText~="" or #model.paper.objectives>0 then
             y=section(addon.Text.questObjectives,y+4*s,width)
             if model.paper.objectiveText and model.paper.objectiveText~="" then
-                y=y+text(model.paper.objectiveText,"EBGaramond-Regular",16*s,0,y,width)+8*s
+                y=y+text(model.paper.objectiveText,"EBGaramond-Regular",t.body,0,y,proseWidth)+8*s
             end
             for index,objective in ipairs(model.paper.objectives) do
                 local marker=markers[index]
@@ -395,11 +396,11 @@ function View.New(parent,options)
                 marker[2]:ClearAllPoints(); marker[2]:SetPoint("CENTER",marker[1],"CENTER",0,0)
                 marker[2]:SetSize(4*s,4*s); marker[2]:SetAlpha(objective.finished and 0 or 1); marker[2]:Show()
                 local caption,count=addon.QuestPresentation.Objective(objective)
-                local reserve=count~="" and math.max(50*s,options.Width(count,"Cinzel-Regular",12*s)+4*s) or 0
-                local height=text(caption,"EBGaramond-Regular",16*s,17*s,y,width-21*s-reserve,
+                local reserve=count~="" and math.max(50*s,options.Width(count,"Cinzel-Regular",t.note)+4*s) or 0
+                local height=text(caption,"EBGaramond-Regular",t.body,17*s,y,width-21*s-reserve,
                     objective.finished and "8b7964" or "352416")
                 if count~="" then
-                    local countHeight=text(count,"Cinzel-Regular",12*s,width-reserve,y+3*s,reserve,"6e5942")
+                    local countHeight=text(count,"Cinzel-Regular",t.note,width-reserve,y+3*s,reserve,"6e5942")
                     height=math.max(height,countHeight)
                 end
                 y=y+height+5*s
@@ -434,10 +435,10 @@ function View.New(parent,options)
                     if not coins[index] then coins[index]=texture(child,"ARTWORK") end
                     coins[index]:Show(); coins[index]:SetTexture(ART.coins[index])
                     coins[index]:ClearAllPoints(); coins[index]:SetPoint("TOPLEFT",child,"TOPLEFT",x,-y-4*s)
-                    coins[index]:SetSize(16*s,16*s)
+                    coins[index]:SetSize(16*u,16*u)
                     local caption=tostring(value).." "..addon.Text.questCoins[index]
-                    local used=options.Width(caption,"EBGaramond-Regular",15*s)+3*s
-                    local lineHeight=text(caption,"EBGaramond-Regular",15*s,x+20*s,y,used,"6a4b13")
+                    local used=options.Width(caption,"EBGaramond-Regular",t.body)+3*s
+                    local lineHeight=text(caption,"EBGaramond-Regular",t.body,x+20*s,y,used,"6a4b13")
                     height=math.max(height,lineHeight)
                     x=x+20*s+used+12*s
                 elseif coins[index] then coins[index]:Hide() end
@@ -448,20 +449,20 @@ function View.New(parent,options)
         end
         if model.paper.experience and model.paper.experience>0 then
             y=y+text(string.format(addon.Text.questExperience,tostring(model.paper.experience)),
-                "EBGaramond-Regular",15*s,0,y,width,"6e5942")+5*s
+                "EBGaramond-Regular",t.body,0,y,width,"6e5942")+5*s
         end
         for index=labelIndex+1,#labels do labels[index]:Hide() end
         for index=itemIndex+1,#items do items[index]:Hide() end
         contentHeight=math.max(1,y+12*s)
         -- Measure in the final fonts at the final width before choosing height.
         -- All resizing happens in this layout pass, without replaying opening.
-        font(more,"EBGaramond-Italic",11*s,"786148")
-        more:ClearAllPoints(); more:SetPoint("BOTTOMLEFT",paper,"BOTTOMLEFT",39*s,88*s); more:SetSize(width,16*s)
+        font(more,"EBGaramond-Italic",t.note,"786148")
+        more:ClearAllPoints(); more:SetPoint("BOTTOMLEFT",paper,"BOTTOMLEFT",39*s,88*s); more:SetSize(width,t.note*1.6)
         more:SetWordWrap(false)
-        font(note,"EBGaramond-Italic",11*s,"786148")
+        font(note,"EBGaramond-Italic",t.note,"786148")
         note:ClearAllPoints(); note:SetPoint("BOTTOMLEFT",footer,"BOTTOMLEFT",58*s,9*s); note:SetSize(width-19*s,16*s)
         note:SetWordWrap(false)
-        book:ClearAllPoints(); book:SetPoint("BOTTOMLEFT",footer,"BOTTOMLEFT",39*s,9*s); book:SetSize(13*s,13*s)
+        book:ClearAllPoints(); book:SetPoint("BOTTOMLEFT",footer,"BOTTOMLEFT",39*s,9*s); book:SetSize(13*u,13*u)
         updateActions(); resize()
     end
     function q.Selection(value) selected=value; model.selected=value; updateActions(); resize() end

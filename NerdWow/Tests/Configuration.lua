@@ -109,7 +109,7 @@ test("catálogo contém sete capítulos e placeholders inativos sem campos de et
     equal(#chapters,7); equal(chapters[1].id,"general"); equal(chapters[7].id,"about")
     for _,id in ipairs({"camera","character"}) do for _,spec in ipairs(r.Options(id)) do equal(spec.soon,true); equal(spec.field,nil) end end
     equal(n.Settings.Describe("windowScale"),nil); equal(n.Settings.Describe("rpName"),nil)
-    local fields=r.Fields(); equal(#fields,5)
+    local fields=r.Fields(); equal(#fields,6)
     for _,field in ipairs(fields) do assert(field~="minimapAngle" and field~="schemaVersion") end
 end)
 test("livro revalida ações em combate e nunca escreve ou executa opção em breve",function()
@@ -383,7 +383,7 @@ end)
 test("botão direito reabre renderer real após verificação terminal sem reload",function()
     local c=t.client(); local s=scene(true); s.n.FontAPI.Preload(); s.r.advance(.2)
     local blocked=true
-    s.r.rejectFont=function(path,size) return blocked and size==26 and path:find("NerdWow\\Fonts\\",1,true)~=nil end
+    s.r.rejectFont=function(path,size) return blocked and size==s.n.FontAPI.Scale().title and path:find("NerdWow\\Fonts\\",1,true)~=nil end
     c.namespace.ConfigurationUI.Open=s.n.ConfigurationUI.Open
     c.start()
     c.buttonEvent("OnMouseUp","RightButton",true); s.r.advance(5.2)
@@ -462,7 +462,7 @@ test("Personagem e Sobre abrem com EB Garamond em EditBox estrita em proporçõe
                 for _,id in ipairs(ids) do
                     local edit=assert(s.control(id,"EditBox"))
                     assert(edit.font:find("EBGaramond-Regular.ttf",1,true)); equal(edit.flags,"")
-                    equal(edit.enabled,chapter=="Sobre"); equal(edit.size,16*math.min(size[1]/scale/1280,size[2]/scale/720))
+                    equal(edit.enabled,chapter=="Sobre"); equal(edit.size,s.n.FontAPI.Scale().body)
                     assert(edit:GetText()~=""); assert(visible(edit))
                 end
                 assert(not s.region(s.n.Text.configLoading))

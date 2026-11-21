@@ -5,7 +5,7 @@ local services,book,view,deadline,canvas
 local flags,fontReport={},{}
 local function fail(fault,stage)
     deadline=nil
-    if view then pcall(view.Hide) end
+    if view then pcall(view.Hide); view=nil end
     addon.DiagnosticAPI.Record("interface","configuration_error",fault,{stage=stage or "configuration"})
     addon.Wow.Print(addon.Text.configFailed)
 end
@@ -34,7 +34,13 @@ function UI.Refresh()
         elseif not deadline then
             local ticket={}; deadline=ticket
             if not addon.ConversationPlatform.Defer(function()
-                if deadline==ticket then fail(addon.DiagnosticAPI.Capture("configuration_preparation_timeout"),"configuration_prepare") end
+                if deadline==ticket and UI.IsOpen() then
+                    deadline=nil
+                    safe(function()
+                        addon.FontAPI.UseFallback("configuration_preparation_deadline")
+                        UI.Refresh()
+                    end,"configuration_prepare")()
+                end
             end,2) then error("defer_unavailable") end
         end
     end,"configuration_layout")()
@@ -45,9 +51,10 @@ end
 function UI.Open()
     if not services then addon.Wow.Print(addon.Text.configNotReady); return false end
     return safe(function()
+        addon.FontAPI.Retry()
         if not view then
-            view=addon.ConfigurationView.New({Select=function(id) book.Select(id); UI.Refresh() end,
-                Move=function(delta) book.Move(delta); UI.Refresh() end,
+            view=addon.ConfigurationView.New({Select=function(id) addon.FontAPI.Retry(); book.Select(id); UI.Refresh() end,
+                Move=function(delta) addon.FontAPI.Retry(); book.Move(delta); UI.Refresh() end,
                 Write=function(id,value) return book.Write(id,value) end,
                 Action=function(id) return book.Activate(id) end,
                 Reset=function() book.RequestReset() end,Close=UI.Close,

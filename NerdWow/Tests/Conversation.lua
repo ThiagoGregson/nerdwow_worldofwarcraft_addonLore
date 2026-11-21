@@ -372,6 +372,7 @@ local function renderer(n,asynchronous)
     local make
     make=function(kind,parent)
         local f={kind=kind,parent=parent,shown=true,scripts={},alpha=1}
+        function f:GetObjectType() return self.kind end
         function f:SetSize(w,h) self.width,self.height=w,h end
         function f:SetWidth(w) self.width=w end
         function f:SetHeight(h) self.height=h end
@@ -424,7 +425,12 @@ local function renderer(n,asynchronous)
             assert(kind=="EditBox"); state.focus=self
             if self.scripts.OnEditFocusGained then self.scripts.OnEditFocusGained(self) end
         end
-        function f:ClearFocus() if state.focus==self then state.focus=nil end end
+        function f:ClearFocus()
+            if state.focus==self then
+                state.focus=nil
+                if self.scripts.OnEditFocusLost then self.scripts.OnEditFocusLost(self) end
+            end
+        end
         function f:SetScript(name,callback) self.scripts[name]=callback end
         function f:GetScript(name) return self.scripts[name] end
         function f:Show()
@@ -787,7 +793,9 @@ test("GetFont restrito não é sucesso nem prova de recusa e conserva a causa",f
     r.drain()
     local ok,fault=n.DiagnosticAPI.Try(n.FontAPI.Apply,object,"Cinzel-Regular",21)
     equal(ok,false); assert(fault.message:find("restricted_font_result",1,true)); assert(fault.stack)
-    for _,call in ipairs(r.fontCalls) do assert(call.path:find("NerdWow\\Fonts\\",1,true)) end
+    local native=false
+    for _,call in ipairs(r.fontCalls) do if call.path=="Fonts\\FRIZQT__.TTF" then native=true end end
+    assert(native,"fallback também precisa ser verificado quando GetFont está restrito")
 end)
 
 test("identidade compara caminho normalizado tamanho e flags em vez de confiar em true",function()
@@ -1093,9 +1101,10 @@ test("fallback mantém altura proporcional e mínimo de oito com flags nil",func
     for _, size in ipairs({4,21,31.5}) do
         n.FontAPI.Apply(object,"EBGaramond-Regular",size)
         equal(object.font,"Fonts\\ARIALN.TTF"); equal(object.size,math.max(8,size))
-        local requested,native=r.fontCalls[#r.fontCalls-1],r.fontCalls[#r.fontCalls]
-        equal(requested.size,native.size); equal(requested.flags,nil); equal(native.flags,nil)
+        local native=r.fontCalls[#r.fontCalls]
+        equal(native.size,math.max(8,size)); equal(native.flags,nil)
     end
+    equal(#r.fontCalls,4); equal(r.fontCalls[1].size,21)
 end)
 
 test("teste de fontes durante cinema não altera texto teclado animação nem diário",function()
@@ -1314,7 +1323,7 @@ test("fonte que não carrega aciona fallback antes de suprimir apresentação na
     c.Refresh(); equal(reports,1); equal(p.root.alpha,.75)
     equal(r.frames[1].shown,false); equal(r.frames[1].keyboard,false)
     equal(r.frames[1].scripts.OnUpdate,nil)
-    equal(#records,4)
+    equal(#records,1)
     for _,record in ipairs(records) do equal(record.code,"font_fallback_failed") end
     assert(records[1].message:find("fallbackSuccess=false",1,true))
 end)
@@ -1359,5 +1368,69 @@ test("supressão idempotente agrega filhos tardios e restaura baselines das duas
     p.api.RestoreNative(); equal(p.root.alpha,.75); equal(p.env.QuestFrame.alpha,.75)
     equal(p.root.mouse,true); equal(p.sibling.mouse,false); equal(late.mouse,true); equal(late.keyboard,true)
     p.root.scripts.OnShow(); equal(notifications,2)
+end)
+test("arquivo confirmado compartilha prontidão em todos os tamanhos sem sondas adicionais",function()
+    local n=core(); local r=renderer(n,true)
+    n.FontAPI.Preload(); r.advance(.2); equal(#r.fontCalls,4)
+    for _,name in ipairs({"Cinzel-Regular","Cinzel-Bold","EBGaramond-Regular","EBGaramond-Italic"}) do
+        for _,size in ipairs({8,13.5,26,63}) do
+            local before=#r.fontCalls
+            equal(n.FontAPI.Prepare(name,size),true); equal(#r.fontCalls,before)
+            local object=r.parent:CreateFontString(nil,"OVERLAY","GameFontNormal")
+            local path,ready=n.FontAPI.Apply(object,name,size)
+            equal(ready,true); equal(object.size,size); assert(path:find(name,1,true))
+        end
+        -- Only the sixteen real regions, never extra probes by size.
+    end
+    equal(#r.fontCalls,20); r.drain(); equal(#r.timers,0)
+end)
+
+test("região sem confirmação no tamanho novo usa fallback e retoma sem reload",function()
+    local n=core(); local r=renderer(n,true); local records={}
+    n.DiagnosticAPI.Bind(function(record) records[#records+1]=record end)
+    n.FontAPI.Preload(); r.advance(.2)
+    local object=r.parent:CreateFontString(nil,"OVERLAY","GameFontNormal")
+    local blocked=true
+    r.fontBehavior=function(path,size,_,region)
+        if region==object and path:find("NerdWow\\Fonts\\",1,true) and blocked then return {delay=30} end
+    end
+    local path,ready=n.FontAPI.Apply(object,"EBGaramond-Regular",16)
+    equal(path,"Fonts\\ARIALN.TTF"); equal(ready,true); equal(#records,1)
+    r.advance(5.1) -- the old region job was terminal here, poisoning every Render.
+    path,ready=n.FontAPI.Apply(object,"EBGaramond-Regular",16)
+    equal(path,"Fonts\\ARIALN.TTF"); equal(ready,true)
+    blocked=false; r.advance(2)
+    path,ready=n.FontAPI.Apply(object,"EBGaramond-Regular",16)
+    assert(path:find("EBGaramond-Regular.ttf",1,true)); equal(ready,true); equal(#records,1)
+    r.drain(); equal(#r.timers,0)
+end)
+
+test("retry de região tem orçamento finito e nova interação reinicia tentativa",function()
+    local n=core(); local r=renderer(n,true)
+    n.FontAPI.Preload(); r.advance(.2)
+    local blocked=true
+    r.rejectFont=function(path,size) return blocked and size==26 and path:find("NerdWow\\Fonts\\",1,true)~=nil end
+    local object=r.parent:CreateFontString(nil,"OVERLAY","GameFontNormal")
+    equal(n.FontAPI.Apply(object,"Cinzel-Bold",26),"Fonts\\FRIZQT__.TTF")
+    r.drain(); equal(#r.timers,0)
+    local before=#r.fontCalls
+    for _=1,8 do equal(n.FontAPI.Apply(object,"Cinzel-Bold",26),"Fonts\\FRIZQT__.TTF") end
+    equal(#r.fontCalls,before)
+    blocked=false; n.FontAPI.Retry()
+    assert(n.FontAPI.Apply(object,"Cinzel-Bold",26):find("Cinzel-Bold.ttf",1,true))
+    equal(n.FontAPI.Prepare("Cinzel-Bold",48),true)
+end)
+
+test("sonda sem confirmação retenta automaticamente mantendo fallback até confirmar arquivo",function()
+    local n=core(); local r=renderer(n,true); local blocked=true; local changes=0
+    r.rejectFont=function(path) return blocked and path:find("NerdWow\\Fonts\\",1,true)~=nil end
+    n.FontAPI.Watch(function() changes=changes+1 end)
+    local object=r.parent:CreateFontString(nil,"OVERLAY","GameFontNormal")
+    equal(select(2,n.FontAPI.Apply(object,"Cinzel-Regular",26)),false)
+    for _=1,51 do r.advance(.1) end
+    equal(n.FontAPI.Apply(object,"Cinzel-Regular",26),"Fonts\\FRIZQT__.TTF")
+    blocked=false; r.drain()
+    assert(changes>0); assert(n.FontAPI.Apply(object,"Cinzel-Regular",26):find("Cinzel-Regular.ttf",1,true))
+    equal(n.FontAPI.Prepare("Cinzel-Regular",48),true); equal(#r.timers,0)
 end)
 return {renderer=renderer,platform=platform,wire=wire}

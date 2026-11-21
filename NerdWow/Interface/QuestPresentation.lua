@@ -106,6 +106,12 @@ function Quest.Actions(view,selected)
     end
     return {{key="FINISH",text=t.questFinish,enabled=#view.entries==0 or Quest.ValidChoice(view,selected)~=nil}}
 end
+function Quest.Primary(view)
+    if view.kind~="quest" then return nil end
+    for _,action in ipairs(Quest.Actions(view,view.selected)) do
+        if not action.ghost and action.enabled then return action end
+    end
+end
 function Quest.Note(view)
     local kind=view.recorded
     local moments={QUEST_OFFERED="OFFER",QUEST_ACCEPTED="OFFER",QUEST_PROGRESS_VIEWED="PROGRESS",QUEST_COMPLETED="COMPLETE"}

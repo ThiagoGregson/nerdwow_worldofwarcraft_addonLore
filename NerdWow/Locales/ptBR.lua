@@ -38,7 +38,7 @@ addon.Text = {
     cinemaUnknownLocation = "Local indisponível",
     cinemaMore = "Role para ler mais",
     cinemaPrevious = "Role para rever a fala",
-    cinemaHintSpeech = "Espaço: completar fala", cinemaHintOption = "1–9: escolher opção",
+    cinemaHintSpeech = "Espaço: completar fala", cinemaHintPrimary = "Espaço: %s", cinemaHintOption = "1–9: escolher opção",
     cinemaHintReward = "1–9: escolher recompensa", cinemaHintExit = "Esc: sair",
     cinemaOptionsMore = "Role para ver mais opções", cinemaOptionsPrevious = "Role para rever as opções",
     questRequiredCount = "Exigidos: %s", questOwnedCount = "Em posse: %s/%s", questOwnedOnly = "Em posse: %s",

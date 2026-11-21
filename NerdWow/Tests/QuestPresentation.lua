@@ -332,7 +332,7 @@ end)
 test("pré carregamento do papel prepara tamanhos sem abrir janela e moedas são nativas",function()
     local s=scene("OFFER",true)
     s.n.QuestView.Preload(1280,720); equal(s.root(),nil)
-    assert(#s.r.fontCalls>=8); s.r.drain(); s.c.Refresh()
+    equal(#s.r.fontCalls,4); s.r.drain(); s.c.Refresh()
     equal(s.reports,0); assert(s.text("12 ouro")); assert(s.text("40 cobre")); assert(s.text("550 de experiência"))
     local gold,copper=false,false
     for _,region in ipairs(s.r.regions) do
@@ -482,7 +482,7 @@ test("dica oferece só ações disponíveis para conversa oferta progresso e rec
         local view=build(n,source(moment))
         for _,typing in ipairs({false,true}) do
             local hint=n.Conversation.Hint(view,typing)
-            equal(hint:find("Espaço",1,true)~=nil,typing)
+            equal(hint:find("Espaço",1,true)~=nil,typing or moment=="OFFER")
             equal(hint:find("recompensa",1,true)~=nil,moment=="COMPLETE")
             assert(hint:find("Esc",1,true))
         end
@@ -500,7 +500,7 @@ test("dica se atualiza ao completar fala por espaço ou pelo tempo",function()
         local hint=s.text(s.n.Conversation.Hint(build(s.n,s.source),true)); assert(hint)
         if manual then s.root().scripts.OnKeyDown(s.root(),"SPACE")
         else s.root().scripts.OnUpdate(s.root(),10) end
-        equal(hint.text,s.n.Text.cinemaHintExit); s.c.Close()
+        equal(hint.text,s.n.Conversation.Hint(build(s.n,s.source),false)); s.c.Close()
     end
 end)
 
@@ -662,7 +662,7 @@ test("evento oculta nativa antes do defer e troca conversa missão conversa sob 
     equal(s.p.env.QuestFrame.alpha,0) -- before any rendering callback.
     local questStart=#s.p.env.QuestFrame.alphaHistory
     s.r.advance(0); equal(s.root().shown,true); equal(s.root().alpha,1)
-    equal(top.height,topHeight); assert(bottom.height>0); equal(s.c.Action("ACCEPT"),false)
+    equal(top.height,topHeight); assert(bottom.height>0); equal(s.button("Aceitar").enabled,true)
     s.p.root.alpha=.75; s.p.root.scripts.OnShow()
     equal(s.p.root.alpha,0) -- synchronous suppression, child work remains deferred.
     for _=1,12 do s.r.advance(.1) end
@@ -694,7 +694,7 @@ test("progresso conclusão mantém barras e escolha até fechar sem restauraçã
     equal(s.root().shown,false); equal(s.p.env.QuestFrame.alpha,.75); s.r.drain()
 end)
 
-test("preparação tem prazo total de dois segundos mesmo com refresh repetido",function()
+test("preparação tem prazo total de dois segundos e abre fallback sem restaurar Blizzard",function()
     local s=scene("OFFER",true); s.p.env.C_Timer.After=s.r.after
     s.r.fontBehavior=function(path)
         if path:find("NerdWow\\Fonts\\",1,true) then return {delay=8} end
@@ -703,10 +703,10 @@ test("preparação tem prazo total de dois segundos mesmo com refresh repetido",
     s.r.advance(.8); s.c.Handle("QUEST_ITEM_UPDATE"); s.r.advance(0)
     s.r.advance(.8); s.c.Handle("QUEST_DETAIL"); s.r.advance(0)
     equal(s.reports,0); equal(s.p.env.QuestFrame.alpha,0); equal(s.root().shown,true)
-    s.r.advance(.41); equal(s.reports,1); equal(s.stage,"preparation_timeout")
-    assert(s.fault.message:find("preparation_timeout",1,true)); assert(s.fault.stack)
-    equal(s.p.env.QuestFrame.alpha,.75); equal(s.root().shown,false); equal(s.root().keyboard,false)
-    s.r.drain(); equal(s.root().shown,false); equal(s.reports,1)
+    s.r.advance(.41); equal(s.reports,0); equal(s.fault,nil)
+    equal(s.p.env.QuestFrame.alpha,0); equal(s.root().shown,true); equal(s.root().keyboard,true)
+    assert(s.button("Aceitar")); s.r.drain(); equal(s.root().shown,true); equal(s.reports,0)
+    s.c.Close()
 end)
 
 test("espera de transição pode sair por Esc desligamento combate ou falha real",function()
@@ -738,15 +738,19 @@ test("arquivo de fonte pronto não espera novamente por tamanho com SetFont fals
     s.c.Close(); r.drain()
 end)
 
-test("arquivo pronto não autoriza tamanho novo com identidade errada ou métrica zero",function()
+test("arquivo pronto dispensa sonda por tamanho e verifica identidade da região com fallback",function()
     for _,mode in ipairs({"identity","metric"}) do
         local s=scene("OFFER",true); local r=s.r; s.p.env.C_Timer.After=r.after
         s.n.FontAPI.Preload(); r.advance(.1)
-        r.fontBehavior=function(_,size)
+        r.fontBehavior=function(path,size)
+            if not path:find("NerdWow\\Fonts\\",1,true) then return end
             if size==27 then return {delay=.5,identityNow=mode=="metric",factor=0} end
         end
         s.c.Handle("QUEST_DETAIL"); r.advance(0)
-        equal(s.p.env.QuestFrame.alpha,0); equal(s.button("Aceitar"),nil)
+        equal(s.p.env.QuestFrame.alpha,0)
+        -- No new-size probe can defer the entire presentation. Actual zero text
+        -- metrics still receive the renderer's bounded layout retry.
+        equal(s.n.FontAPI.Prepare("Cinzel-Bold",27),true)
         for _=1,17 do r.advance(.1) end
         equal(s.reports,0); assert(s.button("Aceitar")); s.c.Close(); r.drain()
     end
@@ -842,4 +846,61 @@ test("capitular insegura deixa primeiro parágrafo integral sem perda nem retic�
     end
 end)
 
+test("Espaço completa fala primeiro e só depois aciona principal de cada momento",function()
+    for _,sample in ipairs({{"OFFER",false,"AcceptQuest"},{"OFFER",true,"AcknowledgeAutoAcceptQuest"},
+        {"PROGRESS",false,"CompleteQuest"},{"COMPLETE",false,"GetQuestReward"}}) do
+        local s=scene(sample[1]); s.autoAccept=sample[2]; s.completable=true
+        s.preferences.numberHotkeys=false; s.c.Refresh()
+        if sample[1]=="COMPLETE" then s.c.Choose(2) end
+        equal(s.c.Key("SPACE"),true); equal(#s.calls,0)
+        local expected=build(s.n,s.source,{questID=101,autoAccept=s.autoAccept,canComplete=true,choiceCount=2})
+        expected.numberHotkeys=false
+        if sample[1]=="COMPLETE" then expected.selected=2 end
+        assert(s.text(s.n.Conversation.Hint(expected,false)))
+        equal(s.c.Key("SPACE"),true); equal(#s.calls,1); equal(s.calls[1].key,sample[3])
+        if sample[1]=="COMPLETE" then equal(s.calls[1].index,2) end
+        s.c.Key("SPACE"); equal(#s.calls,1); s.c.Close()
+    end
+end)
+
+test("Espaço ignora principal desabilitado e dica acompanha recompensa e progresso",function()
+    for _,moment in ipairs({"PROGRESS","COMPLETE"}) do
+        local s=scene(moment); s.c.Refresh(); s.c.Key("SPACE")
+        equal(s.c.Key("SPACE"),true); equal(#s.calls,0)
+        local oldHint=s.n.Conversation.Hint(build(s.n,s.source),false)
+        local hint=assert(s.text(oldHint)); assert(not hint.text:find("Espaço",1,true))
+        if moment=="COMPLETE" then s.c.Key("2")
+        else s.completable=true; s.c.Update() end
+        assert(hint.text:find("Espaço",1,true)); equal(#s.calls,0)
+        s.c.Key("SPACE"); equal(#s.calls,1); s.c.Close()
+    end
+end)
+
+test("Espaço conclui missão sem escolha e revalida mudança do cliente antes da API",function()
+    local s=scene("COMPLETE"); s.source.rewards.choices={}; s.c.Refresh(); s.c.Complete()
+    equal(s.c.Key("SPACE"),true); equal(s.calls[1].key,"GetQuestReward"); s.c.Close()
+    s=scene("PROGRESS"); s.completable=true; s.c.Refresh(); s.c.Complete(); s.completable=false
+    s.c.Key("SPACE"); equal(#s.calls,0); equal(s.reports,1); equal(s.p.env.QuestFrame.alpha,.75)
+end)
+test("recuperação de fonte na missão conserva fala seleção e animação",function()
+    local s=scene("COMPLETE",true); s.n.FontAPI.Preload(); s.r.advance(.2)
+    s.source.quest.rewardText="A memória dos nomes que você trouxe será preservada nos tomos da biblioteca. Obrigada por retornar."
+    local blocked=true
+    s.r.rejectFont=function(path,size) return blocked and size==27 and path:find("Cinzel-Bold",1,true)~=nil end
+    s.c.Refresh(); s.c.Choose(2)
+    local root=s.root(); root.scripts.OnUpdate(root,.15)
+    local before={}
+    for _,region in ipairs(s.r.regions) do
+        local parent,visible=region,true
+        while parent do if not parent.shown or parent.alpha==0 then visible=false end; parent=parent.parent end
+        if visible then before[region]=region.text end
+    end
+    local update,alpha=root.scripts.OnUpdate,root.alpha
+    blocked=false; s.r.advance(1.1)
+    equal(root.scripts.OnUpdate,update); equal(root.alpha,alpha); equal(s.button("Concluir").enabled,true)
+    for region,text in pairs(before) do equal(region.text,text) end
+    assert(s.text(s.source.quest.title).font:find("Cinzel-Bold.ttf",1,true))
+    equal(s.p.env.QuestFrame.alpha,0); equal(s.reports,0); equal(#s.calls,0)
+    s.c.Close(); s.r.drain()
+end)
 return {scene=scene,source=source,conversationScene=conversationScene}

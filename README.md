@@ -71,7 +71,8 @@ As opções permanecem na barra inferior; quando necessário, a fala e as opçõ
 | Progresso | **Continuar** fica disponível quando a missão puder ser entregue; **Voltar depois** fecha a leitura |
 | Conclusão | Clique numa recompensa ou use **1–9**, depois **Concluir**; uma única opção já vem selecionada |
 | Ler e comparar | Role o mouse sobre o papel e passe sobre os itens para ver o tooltip |
-| Completar a fala ou fechar | **Espaço** completa a legenda; **Esc** ou **×** fecha a missão |
+| Completar a fala ou agir | O primeiro **Espaço** completa a legenda; com a fala completa, aciona **Aceitar**, a confirmação, **Continuar** ou **Concluir**, quando o botão estiver habilitado |
+| Fechar a missão | **Esc** ou **×** |
 
 O pergaminho ajusta a altura ao conteúdo e rola quando chega ao limite. Nos itens exigidos, mostra a quantidade necessária e a quantidade em posse quando disponível.
 

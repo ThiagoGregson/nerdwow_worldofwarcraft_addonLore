@@ -448,7 +448,14 @@ function View.New(newCallbacks)
     end
     function handle.Complete() if speech then reveal(speech.Complete()); keyHint() end end
     function handle.IsTyping() return speech and not speech.IsComplete() or false end
-    function handle.Selection(value) if questPaper then questPaper.Selection(value) end end
+    function handle.Selection(value)
+        if questPaper then questPaper.Selection(value); keyHint() end
+    end
+    function handle.Fallback()
+        if not waiting and not refreshPending then return false end
+        addon.FontAPI.UseFallback("conversation_preparation_deadline")
+        return true
+    end
     function handle.Configure(preferences)
         if not model or not shown then return end
         addon.Conversation.Configure(model,preferences)

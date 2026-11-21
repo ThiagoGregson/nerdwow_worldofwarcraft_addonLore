@@ -218,7 +218,7 @@ test("livro funciona em três proporções quatro escalas com texto extenso e ro
         s.n.ConfigurationUI.Close()
     end end
 end)
-test("espera por fonte do livro não remove observador do cinema e falha fecha somente o livro",function()
+test("espera por fonte do livro preserva observador e prazo abre fallback recuperável",function()
     local s=scene(true); local cinemaChanges=0
     s.n.FontAPI.Watch(function() cinemaChanges=cinemaChanges+1 end)
     s.r.fontBehavior=function(path) if path:find("NerdWow\\Fonts\\",1,true) and not s.r.loaded[path] then return {delay=.4} end end
@@ -226,9 +226,15 @@ test("espera por fonte do livro não remove observador do cinema e falha fecha s
     if s.frame().scripts.OnUpdate then s.frame().scripts.OnUpdate(s.frame(),1) end
     assert(s.region("Geral")); equal(#s.records,0)
     s.n.ConfigurationUI.Close()
-    s=scene(true); s.r.fontBehavior=function() return {delay=8} end
-    s.n.ConfigurationUI.Open(); s.r.advance(2.1); equal(s.n.ConfigurationUI.IsOpen(),false); equal(s.frame().keyboard,false)
-    equal(s.records[#s.records].code,"configuration_error"); s.r.drain(); equal(s.n.ConfigurationUI.IsOpen(),false)
+    s=scene(true); s.r.fontBehavior=function(path)
+        if path:find("NerdWow\\Fonts\\",1,true) and not s.r.loaded[path] then return {delay=8} end
+    end
+    s.n.ConfigurationUI.Open(); s.r.advance(2.1); equal(s.n.ConfigurationUI.IsOpen(),true)
+    if s.frame().scripts.OnUpdate then s.frame().scripts.OnUpdate(s.frame(),1) end
+    assert(s.region("Geral")); assert(not s.region(s.n.Text.configLoading)); equal(s.frame().keyboard,true)
+    for _,record in ipairs(s.records) do equal(record.code,"font_fallback") end
+    s.r.drain(); equal(s.n.ConfigurationUI.IsOpen(),true)
+    assert(s.region("Geral").font:find("NerdWow\\Fonts\\",1,true)); equal(#s.r.timers,0)
 end)
 test("entrada nativa usa API Settings e abre o mesmo livro sem duplicar categoria",function()
     local s=scene(); equal(s.nativeCategories,1); s.n.ConfigurationUI.Register(); equal(s.nativeCategories,1)
@@ -360,4 +366,89 @@ test("falha de textura do livro registra causa fecha teclado e não impede nova 
     s.r.env.CreateColor=color; s.open(); equal(s.n.ConfigurationUI.IsOpen(),true)
 end)
 
+test("tamanho novo sem confirmação não inutiliza livro ao navegar capítulos",function()
+    local s=scene(true); s.n.FontAPI.Preload(); s.r.advance(.2)
+    local blocked=true
+    s.r.rejectFont=function(path,size) return blocked and size~=21 and path:find("NerdWow\\Fonts\\",1,true)~=nil end
+    s.open(); assert(s.region("Geral")); assert(not s.region(s.n.Text.configLoading))
+    s.r.advance(5.2); s.select("Diálogo"); s.select("Sobre")
+    assert(s.region("Sobre")); assert(s.control("github","EditBox")); equal(s.n.ConfigurationUI.IsOpen(),true)
+    for _,record in ipairs(s.records) do equal(record.code,"font_fallback") end
+    assert(#s.records>0 and #s.records<=4)
+    blocked=false; s.select("Geral")
+    assert(s.region("Geral").font:find("NerdWow\\Fonts\\",1,true))
+    s.n.ConfigurationUI.Close(); s.open(); assert(s.region("Geral")); s.r.drain(); equal(#s.r.timers,0)
+end)
+
+test("botão direito reabre renderer real após verificação terminal sem reload",function()
+    local c=t.client(); local s=scene(true); s.n.FontAPI.Preload(); s.r.advance(.2)
+    local blocked=true
+    s.r.rejectFont=function(path,size) return blocked and size==26 and path:find("NerdWow\\Fonts\\",1,true)~=nil end
+    c.namespace.ConfigurationUI.Open=s.n.ConfigurationUI.Open
+    c.start()
+    c.buttonEvent("OnMouseUp","RightButton",true); s.r.advance(5.2)
+    local root=s.frame(); if root.scripts.OnUpdate then root.scripts.OnUpdate(root,1) end
+    equal(s.n.ConfigurationUI.IsOpen(),true); assert(s.region("Geral"))
+    s.n.ConfigurationUI.Close(); blocked=false
+    c.buttonEvent("OnMouseUp","RightButton",true); root=s.frame(); if root.scripts.OnUpdate then root.scripts.OnUpdate(root,1) end
+    equal(s.n.ConfigurationUI.IsOpen(),true); assert(s.region("Geral").font:find("Cinzel-Bold.ttf",1,true))
+    equal(c.reloads,0); equal(c.popupRequests,0); s.r.drain(); equal(#s.r.timers,0)
+end)
+
+test("falha real de Render descarta view e próxima abertura cria livro limpo",function()
+    local s=scene(); s.open(); local old=s.frame()
+    s.r.getFont=function() error("book_region_original") end
+    -- A chapter with a new EditBox forces verification on an actual region.
+    s.select("Sobre"); equal(s.n.ConfigurationUI.IsOpen(),false)
+    equal(old.keyboard,false); equal(old.shown,false)
+    local last=s.records[#s.records]; equal(last.code,"configuration_error")
+    assert(last.message:find("book_region_original",1,true)); assert(last.stack)
+    s.r.getFont=nil; s.open(); assert(s.frame()~=old); assert(s.control("github","EditBox"))
+    assert(not s.region(s.n.Text.configLoading)); equal(s.n.ConfigurationUI.IsOpen(),true)
+end)
+
+test("hover de índice linhas botões e interruptores tem contraste nos quatro temas",function()
+    for _,theme in ipairs({"alliance","horde","quelthalas","neutral"}) do
+        local s=scene(); s.settings.Set("theme",theme); s.open()
+        local chosen=s.button("Geral"); local nextChapter=s.button("Diálogo")
+        equal(chosen.feedback.selected,true); equal(nextChapter.feedback.selected,false)
+        nextChapter.scripts.OnEnter(nextChapter)
+        equal(nextChapter.feedback.fill.fill[4],.24); equal(nextChapter.feedback.marker.fill[4],.95)
+        equal(chosen.feedback.fill.fill[4],0); equal(chosen.fill.fill[4],.12)
+        chosen.scripts.OnEnter(chosen); equal(chosen.feedback.fill.fill[4],.32)
+        nextChapter.scripts.OnLeave(nextChapter); equal(nextChapter.feedback.fill.fill[4],0)
+        local toggle=s.control("minimap","Button"); local row=toggle.parent
+        local textColor=t.serialize(row.title.textColor)
+        toggle.scripts.OnEnter(toggle); equal(toggle.feedback.fill.fill[4],.24)
+        equal(row.feedback.fill.fill[4],.24); equal(t.serialize(row.title.textColor),textColor)
+        toggle.scripts.OnLeave(toggle); equal(row.feedback.fill.fill[4],0)
+        local close=s.button("Fechar"); close.scripts.OnEnter(close)
+        equal(close.alpha,1); equal(close.feedback.fill.fill[4],.24)
+        assert(close.label.textColor[1]>.9); close.scripts.OnLeave(close)
+        local root=s.frame(); root.scripts.OnKeyDown(root,"DOWN")
+        equal(nextChapter.feedback.focus,true); equal(nextChapter.feedback.fill.fill[4],.32)
+        local slider=s.control("speed","Slider"); slider.scripts.OnMouseDown(slider)
+        equal(slider.feedback.focus,true); equal(slider.parent.feedback.fill.fill[4],.24)
+        slider.scripts.OnMouseUp(slider); equal(slider.feedback.focus,false)
+        s.select("Sobre"); local edit=s.control("github","EditBox"); edit:SetFocus()
+        equal(edit.feedback.fill.fill[4],.24); equal(edit.parent.feedback.fill.fill[4],.24)
+        edit:ClearFocus(); equal(edit.feedback.fill.fill[4],0)
+        s.n.ConfigurationUI.Close()
+    end
+end)
+
+test("hover não habilita em breve e seleção sublinhada conserva destaque",function()
+    local s=scene(); s.open(); local select=s.control("theme","Button")
+    select.scripts.OnEnter(select); equal(select.feedback.fill.fill[4],.24)
+    select.scripts.OnClick(select); local choice=s.button("Neutro"); choice.scripts.OnEnter(choice)
+    equal(choice.feedback.fill.fill[4],.24); choice.scripts.OnClick(choice); equal(s.root.theme,"neutral")
+    s.select("Câmera e interface")
+    for _,frame in ipairs(s.r.frames) do
+        if frame.parent.spec and frame.parent.spec.soon and frame.feedback and visible(frame) then
+            frame.scripts.OnEnter(frame); equal(frame.enabled,false)
+            assert(frame.feedback.fill.fill[4]<.24)
+        end
+    end
+    s.n.ConfigurationUI.Close()
+end)
 return {scene=scene,visible=visible}

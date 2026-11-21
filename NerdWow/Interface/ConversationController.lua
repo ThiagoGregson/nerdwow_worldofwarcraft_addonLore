@@ -51,7 +51,10 @@ function Controller.New(options)
         local ticket={}; deadline=ticket
         if not options.Platform.Defer(function()
             if deadline==ticket then
-                guard("preparation_timeout",function() error("preparation_timeout",0) end)
+                guard("preparation_timeout",function()
+                    if view and view.Fallback and view.Fallback() then controller.Refresh(0,true)
+                    else error("preparation_timeout",0) end
+                end)
             end
         end,Controller.PREPARATION_TIMEOUT) then error("defer_unavailable") end
     end
@@ -243,6 +246,11 @@ function Controller.New(options)
         if not current or not view then return false end
         local ok,typing=attempt(view.IsTyping)
         if not ok then controller.Fail(typing,"key"); return false end
+        if key=="SPACE" and not typing and current.kind=="quest" then
+            local primary=addon.QuestPresentation.Primary(current)
+            if primary then controller.Action(primary.key) end
+            return true
+        end
         local action,index=addon.Conversation.Key(key,typing)
         if action=="choose" and current.numberHotkeys==false then return false end
         if action=="choose" and current.kind=="quest" and #current.entries==0 then return false end

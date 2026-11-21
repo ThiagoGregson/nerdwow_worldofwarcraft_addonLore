@@ -142,6 +142,14 @@ if configuration then
         local s=configuration.scene(); s.version=configuration.version; s.source={moment="BOOK"..theme}; s.settings.Set("theme",theme); s.open()
         html[#html+1]='<h2>Livro · '..theme..'</h2>'..draw(s)
     end
+    for _,theme in ipairs({"alliance","horde","quelthalas","neutral"}) do
+        local s=configuration.scene(); s.version=configuration.version; s.source={moment="HOVER"..theme}
+        s.settings.Set("theme",theme); s.open()
+        local chapter=s.button("Diálogo"); chapter.scripts.OnEnter(chapter)
+        local toggle=s.control("minimap","Button"); toggle.scripts.OnEnter(toggle)
+        local close=s.button("Fechar"); close.scripts.OnEnter(close)
+        html[#html+1]='<h2>Hover · '..theme..' · capítulo, linha, interruptor e botão</h2>'..draw(s)
+    end
     html[#html+1]='</main></html>'
 end
 return table.concat(html)

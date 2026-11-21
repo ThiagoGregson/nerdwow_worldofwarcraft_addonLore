@@ -53,7 +53,7 @@ function View.New(callbacks)
     ornaments:SetFrameLevel(contents:GetFrameLevel()+5)
     local ribbon=solid(ornaments,"2d4f86",1,"OVERLAY"); local ribbonTips={}
     for i=1,30 do ribbonTips[i]=solid(ornaments,"2d4f86",1,"OVERLAY") end
-    local brand=label(contents); local subtitle=label(contents)
+    local headings={brand=label(contents),subtitle=label(contents)}
     local emblem=contents:CreateTexture(nil,"ARTWORK"); emblem:SetTexture("Interface\\Icons\\INV_Misc_Book_09")
     local rules={solid(contents,"70412a",.5),solid(contents,"70412a",.5),solid(contents,"70412a",.5)}
     rules[3]:SetRotation(math.pi/4)
@@ -61,7 +61,7 @@ function View.New(callbacks)
     indexScroll:SetScrollChild(indexChild); indexScroll:EnableMouseWheel(true)
     indexChild:SetPoint("TOPLEFT",indexScroll,"TOPLEFT",0,0)
     local indexNote=label(contents)
-    local kicker,title,lead=label(contents),label(contents),label(contents)
+    headings.kicker=label(contents); headings.title=label(contents); headings.lead=label(contents)
     local optionScroll=CreateFrame("ScrollFrame",nil,contents); local child=CreateFrame("Frame",nil,optionScroll)
     optionScroll:SetScrollChild(child); optionScroll:EnableMouseWheel(true); optionScroll:EnableMouse(true)
     child:SetPoint("TOPLEFT",optionScroll,"TOPLEFT",0,0)
@@ -121,13 +121,55 @@ function View.New(callbacks)
         scrollbar()
     end
     indexScroll:SetScript("OnMouseWheel",safe(wheel)); optionScroll:SetScript("OnMouseWheel",safe(wheel))
+    local function feedback(frame,owner)
+        if frame.feedback then return end
+        local f={fill=solid(frame,"70412a",0,"BORDER"),marker=solid(frame,"70412a",0,"OVERLAY")}
+        frame.feedback=f
+        f.fill:SetPoint("TOPLEFT",frame,"TOPLEFT",0,0); f.fill:SetPoint("BOTTOMRIGHT",frame,"BOTTOMRIGHT",0,0)
+        function frame.RefreshFeedback()
+            if not layout or not theme then return end
+            local active=f.hover or f.focus or f.childHover or f.childFocus
+            local alpha=active and (f.selected and .32 or .24) or 0
+            if frame.allowed==false then alpha=alpha*.45 end
+            paint(f.fill,f.primary and theme.secondary or theme.seal,alpha)
+            paint(f.marker,f.primary and "f7ecd4" or theme.seal,active and .95 or 0)
+            local x=-5*layout.scale
+            if frame:GetObjectType()=="Frame" or f.selected~=nil then x=0 end
+            f.marker:ClearAllPoints(); f.marker:SetPoint("TOPLEFT",frame,"TOPLEFT",x,0)
+            f.marker:SetSize((f.selected and 5 or 3)*layout.scale,frame:GetHeight())
+        end
+        local function hook(event,callback)
+            local previous=frame:GetScript(event)
+            frame:SetScript(event,safe(function(...)
+                if previous then previous(...) end
+                callback()
+            end,"configuration_feedback"))
+        end
+        local function update(field,value)
+            f[field]=value; frame.RefreshFeedback()
+            if owner then
+                local key=field=="hover" and "childHover" or "childFocus"
+                if value then owner.feedback[key]=frame
+                elseif owner.feedback[key]==frame then owner.feedback[key]=nil end
+                owner.RefreshFeedback()
+            end
+        end
+        hook("OnEnter",function() update("hover",true) end)
+        hook("OnLeave",function() update("hover",false) end)
+        hook("OnHide",function() update("hover",false); update("focus",false) end)
+        if frame:GetObjectType()=="EditBox" then
+            hook("OnEditFocusGained",function() update("focus",true) end)
+            hook("OnEditFocusLost",function() update("focus",false) end)
+        else
+            hook("OnMouseDown",function() update("focus",true) end)
+            hook("OnMouseUp",function() update("focus",false) end)
+        end
+    end
     local function button(parent)
         local b=CreateFrame("Button",nil,parent); b:RegisterForClicks("LeftButtonUp")
         b.fill=solid(b,"70412a",.07); b.fill:SetAllPoints()
         b.edges={}; for i=1,4 do b.edges[i]=solid(b,"70412a",.5,"BORDER") end
         b.label=label(b); b.label:SetAllPoints(); b.label:SetJustifyH("CENTER"); b.label:SetJustifyV("MIDDLE"); b.label:SetWordWrap(false)
-        b:SetScript("OnEnter",safe(function() if b.allowed~=false then b:SetAlpha(.84) end end))
-        b:SetScript("OnLeave",safe(function() b:SetAlpha(b.allowed==false and .45 or 1) end))
         return b
     end
     local function formatButton(b,caption,width,height,primary)
@@ -141,6 +183,7 @@ function View.New(callbacks)
         b.edges[2]:SetPoint("BOTTOMLEFT"); b.edges[2]:SetSize(w,s)
         b.edges[3]:SetPoint("TOPLEFT"); b.edges[3]:SetSize(s,h)
         b.edges[4]:SetPoint("TOPRIGHT"); b.edges[4]:SetSize(s,h)
+        feedback(b); b.feedback.primary=primary; b.RefreshFeedback()
     end
     local restore,close=button(footer),button(footer)
     restore:SetScript("OnClick",safe(function() callbacks.Reset() end))
@@ -157,6 +200,7 @@ function View.New(callbacks)
         row=CreateFrame("Frame",nil,child); row.title=label(row); row.description=label(row)
         row.rule=solid(row,"70412a",.16); row.rule:SetPoint("BOTTOMLEFT"); row.rule:SetPoint("BOTTOMRIGHT")
         row.value=label(row); row.badge=label(row)
+        row:EnableMouse(true); feedback(row)
         rows[index]=row; return row
     end
     local controls={}
@@ -226,7 +270,7 @@ function View.New(callbacks)
         for key,widget in pairs(row.widgets) do if key~=kind then widget:Hide() end end
         if not controls[kind] then return end
         local w=row.widgets[kind]
-        if not w then w=controls[kind](row); row.widgets[kind]=w end
+        if not w then w=controls[kind](row); feedback(w,row); row.widgets[kind]=w end
         w:Show(); return w
     end
     local function arrangeControl(row,b,width,height)
@@ -236,7 +280,7 @@ function View.New(callbacks)
         if spec.kind=="text" or spec.kind=="slider" then
             if enabled then b:Enable() else b:Disable() end
         else b:SetEnabled(enabled) end
-        b.allowed=spec.enabled; b:SetAlpha(spec.soon and .5 or 1)
+        b.allowed=enabled; b:SetAlpha(spec.soon and .5 or 1)
         if spec.kind=="switch" then
             b:SetSize(54*s,26*s)
             anchor(b.track,b,13*s,1*s,28*s,24*s)
@@ -273,13 +317,13 @@ function View.New(callbacks)
             b.line:SetHeight(s)
             if spec.soon and (spec.value==nil or spec.value=="") then b:SetText(spec.placeholder or "") end
         elseif spec.kind=="action" then formatButton(b,spec.button or spec.title,width,height,spec.primary); b:SetAlpha(spec.enabled and 1 or .4) end
+        b.RefreshFeedback()
     end
     local function render()
         local dimensions=addon.DiagnosticAPI.Dimensions(UIParent,root)
         layout=assert(addon.ConfigurationBook.Layout(dimensions.viewportWidth,dimensions.viewportHeight),"layout_unavailable")
         local s=layout.scale; local w,h,lw,rw=layout.width,layout.height,layout.left,layout.right
-        -- Start the complete book's font profiles together, avoiding serial waits
-        -- as chapters and the initially hidden confirmation acquire their fonts.
+        -- All sizes share a single readiness probe for each font file.
         for _,request in ipairs({{"Cinzel-Bold",20},{"Cinzel-Bold",26},{"Cinzel-Bold",13.5},
             {"Cinzel-Regular",13},{"Cinzel-Regular",14},{"Cinzel-Regular",18},
             {"EBGaramond-Italic",12},{"EBGaramond-Italic",13},{"EBGaramond-Italic",13.5},{"EBGaramond-Italic",14},
@@ -305,8 +349,8 @@ function View.New(callbacks)
             paint(ribbonTips[i*2-1],theme.seal); paint(ribbonTips[i*2],theme.seal)
         end
         anchor(emblem,contents,42*s,42*s,40*s,40*s)
-        anchor(brand,contents,94*s,40*s); text(brand,"NerdWow","Cinzel-Bold",20*s,lw-100*s); ink(brand,"2a1d12")
-        anchor(subtitle,contents,94*s,67*s); text(subtitle,"Configurações","EBGaramond-Italic",14*s,lw-100*s); ink(subtitle,"5a4632")
+        anchor(headings.brand,contents,94*s,40*s); text(headings.brand,"NerdWow","Cinzel-Bold",20*s,lw-100*s); ink(headings.brand,"2a1d12")
+        anchor(headings.subtitle,contents,94*s,67*s); text(headings.subtitle,"Configurações","EBGaramond-Italic",14*s,lw-100*s); ink(headings.subtitle,"5a4632")
         anchor(rules[1],contents,42*s,105*s,(lw-70*s)/2-13*s,s)
         anchor(rules[2],contents,42*s+(lw-70*s)/2+13*s,105*s,(lw-70*s)/2-13*s,s)
         anchor(rules[3],contents,42*s+(lw-70*s)/2-3*s,102*s,6*s,6*s)
@@ -320,6 +364,7 @@ function View.New(callbacks)
                 b=CreateFrame("Button",nil,indexChild); b:RegisterForClicks("LeftButtonUp")
                 b.fill=solid(b,"70412a",.08); b.fill:SetAllPoints(); b.marker=solid(b,"2d4f86")
                 b.number,b.label,b.soon=label(b),label(b),label(b); b.dots={}; nav[index]=b
+                feedback(b)
             end
             b:Show(); anchor(b,indexChild,0,y)
             local labelWidth=lw-90*s-(spec.soon and 55*s or 0)
@@ -341,19 +386,24 @@ function View.New(callbacks)
             b.fill:SetAlpha(spec.id==snapshot.chapter and 1 or 0); paint(b.fill,theme.seal,.12)
             b.marker:SetAlpha(spec.id==snapshot.chapter and 1 or 0); paint(b.marker,theme.seal)
             anchor(b.marker,b,0,0,3*s,b:GetHeight())
-            local id=spec.id; b:SetScript("OnClick",safe(function() menu:Hide(); optionScroll:SetVerticalScroll(0); callbacks.Select(id) end))
+            b.feedback.selected=spec.id==snapshot.chapter
+            b.RefreshFeedback()
+            local id=spec.id; b:SetScript("OnClick",safe(function()
+                for _,item in ipairs(nav) do item.feedback.focus=false end
+                menu:Hide(); optionScroll:SetVerticalScroll(0); callbacks.Select(id)
+            end))
             y=y+b:GetHeight()+2*s
         end
         for index=#snapshot.chapters+1,#nav do nav[index]:Hide() end
         indexChild:SetHeight(y); indexScroll:UpdateScrollChildRect()
         local x=14*s+lw+34*s; local width=rw-68*s
-        anchor(kicker,contents,x,40*s)
+        anchor(headings.kicker,contents,x,40*s)
         local header=snapshot.header
         local chapterNumber=""
         for _,chapter in ipairs(snapshot.chapters) do if chapter.id==snapshot.chapter then chapterNumber=chapter.roman end end
-        text(kicker,"Capítulo "..chapterNumber..(header.soon and " · em breve" or ""),"EBGaramond-Italic",14*s,width); ink(kicker,theme.seal)
-        anchor(title,contents,x,61*s); local th=text(title,header.title,"Cinzel-Bold",26*s,width); ink(title,"2a1d12")
-        anchor(lead,contents,x,65*s+th); local lh=text(lead,header.description,"EBGaramond-Regular",16*s,width); ink(lead,"5a4632")
+        text(headings.kicker,"Capítulo "..chapterNumber..(header.soon and " · em breve" or ""),"EBGaramond-Italic",14*s,width); ink(headings.kicker,theme.seal)
+        anchor(headings.title,contents,x,61*s); local th=text(headings.title,header.title,"Cinzel-Bold",26*s,width); ink(headings.title,"2a1d12")
+        anchor(headings.lead,contents,x,65*s+th); local lh=text(headings.lead,header.description,"EBGaramond-Regular",16*s,width); ink(headings.lead,"5a4632")
         local top=77*s+th+lh
         anchor(optionScroll,contents,x,top,width,h-top-78*s); child:SetWidth(width)
         anchor(scrollTrack,contents,x+width+10*s,top,2*s,optionScroll:GetHeight()); scrollThumb:SetWidth(2*s)
@@ -376,7 +426,9 @@ function View.New(callbacks)
                     local hh=text(row.title,row.spec.title,"EBGaramond-Regular",13.5*s,cardWidth-20*s); ink(row.title,"5a4632")
                     maxHeight=math.max(maxHeight,vh+hh+25*s); row:SetSize(cardWidth,vh+hh+25*s)
                 end
-                for column=1,count do rows[index+column-1]:SetHeight(maxHeight) end
+                for column=1,count do
+                    local card=rows[index+column-1]; card:SetHeight(maxHeight); card.RefreshFeedback()
+                end
                 y=y+maxHeight+14*s; index=index+count
             else
                 local row=row(index); row.spec=spec; row:Show(); anchor(row,child,0,y)
@@ -386,11 +438,11 @@ function View.New(callbacks)
                 local b=control(row)
                 local full=spec.fullWidth or spec.kind=="info" and not spec.description
                 local titleWidth=full and width or width-controlWidth-24*s
-                anchor(row.title,row,0,12*s)
-                local hh=text(row.title,spec.title..(spec.soon and " · em breve" or ""),"EBGaramond-Regular",17.5*s,titleWidth)
+                anchor(row.title,row,7*s,12*s)
+                local hh=text(row.title,spec.title..(spec.soon and " · em breve" or ""),"EBGaramond-Regular",17.5*s,titleWidth-7*s)
                 ink(row.title,"2a1d12",spec.soon and .55 or 1)
-                anchor(row.description,row,0,16*s+hh)
-                local dh=text(row.description,spec.description or "","EBGaramond-Regular",14.5*s,titleWidth)
+                anchor(row.description,row,7*s,16*s+hh)
+                local dh=text(row.description,spec.description or "","EBGaramond-Regular",14.5*s,titleWidth-7*s)
                 ink(row.description,"5a4632",spec.soon and .55 or 1)
                 local height=hh+(spec.description and dh+4*s or 0)+24*s
                 if spec.kind=="info" then
@@ -403,7 +455,7 @@ function View.New(callbacks)
                     arrangeControl(row,b,full and width or controlWidth,30*s)
                     height=math.max(height,by+42*s)
                 end
-                row:SetSize(width,height); y=y+height; index=index+1
+                row:SetSize(width,height); row.RefreshFeedback(); y=y+height; index=index+1
             end
         end
         for i=#snapshot.options+1,#rows do rows[i]:Hide() end
@@ -467,6 +519,7 @@ function View.New(callbacks)
             root:SetPropagateKeyboardInput(false)
         elseif not GetCurrentKeyBoardFocus() and not confirm:IsShown() and (key=="UP" or key=="DOWN") then
             menu:Hide(); optionScroll:SetVerticalScroll(0); callbacks.Move(key=="UP" and -1 or 1); root:SetPropagateKeyboardInput(false)
+            for _,b in ipairs(nav) do b.feedback.focus=b.feedback.selected; b.RefreshFeedback() end
         end
     end))
     root:SetScript("OnKeyUp",function() root:SetPropagateKeyboardInput(true) end)

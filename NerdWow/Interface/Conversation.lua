@@ -85,7 +85,11 @@ function Conversation.Arrange(layout,header,speech,options)
 end
 function Conversation.Hint(view,typing)
     local parts={}
-    if typing then parts[#parts+1]=addon.Text.cinemaHintSpeech end
+    if typing then parts[#parts+1]=addon.Text.cinemaHintSpeech
+    elseif view.kind=="quest" then
+        local primary=addon.QuestPresentation.Primary(view)
+        if primary then parts[#parts+1]=string.format(addon.Text.cinemaHintPrimary,primary.text) end
+    end
     for index,entry in ipairs(view.entries or {}) do
         if index>9 then break end
         if entry.enabled and view.numberHotkeys~=false then

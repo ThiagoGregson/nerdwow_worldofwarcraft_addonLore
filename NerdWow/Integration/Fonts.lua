@@ -4,13 +4,12 @@ addon.FontAPI = Fonts
 local BASE = "Interface\\AddOns\\NerdWow\\Fonts\\"
 local TITLE, BODY = "Fonts\\FRIZQT__.TTF", "Fonts\\ARIALN.TTF"
 local SAMPLE = "Áurea memória de Azeroth: Wimm, Vila Norte, 0123456789."
-local INTERVAL, CHECKS, MAX_PROFILES = .1, 50, 128
+local INTERVAL, CHECKS = .1, 50
 local files = {
     {name="Cinzel-Regular",fallback=TITLE}, {name="Cinzel-Bold",fallback=TITLE},
     {name="EBGaramond-Regular",fallback=BODY}, {name="EBGaramond-Italic",fallback=BODY},
 }
-local embedded, reported, profiles, order = {},{},{},{}
-local readyFiles={}
+local embedded, reported, profiles = {},{},{}
 local applications = setmetatable({}, {__mode="k"})
 local preloaded, frame, changed, probes, testGeneration = false,nil,{}, {},0
 for _, file in ipairs(files) do file.path=BASE..file.name..".ttf"; embedded[file.name]=file end
@@ -108,70 +107,81 @@ local function request(object,path,size,flags,metrics,onChange,onDone,trusted)
     end
     return job
 end
-local function fallback(job,file)
-    -- A matching GetFont is never overridden just because SetFont returned false.
-    if job.value.applied or job.readFault then return end
-    local success,fault=setFont(job.object,file.fallback,job.size,nil)
-    local native=snapshot({object=job.object,path=file.fallback,size=job.size,metrics=true})
-    job.selected=file.fallback
-    job.ready=native.applied and positive(native.width) and positive(native.height)
+local function fallback(object,file,size,job,reason)
+    local success,fault=setFont(object,file.fallback,size,nil)
+    local native,readFault=snapshot({object=object,path=file.fallback,size=size})
     if not reported[file.name] then
         reported[file.name]=true
-        local message=result(file.path,nil,job.size,job.success).."; fallback="..file.fallback
+        local message=result(file.path,nil,size,job.success).."; fallback="..file.fallback
             .."; fallbackSuccess="..tostring(success)..observation(job.value).."; fallbackApplied="..tostring(native.applied)
+            .."; reason="..(reason or "unconfirmed")
         addon.DiagnosticAPI.Record("interface",native.applied and "font_fallback" or "font_fallback_failed",
-            detail(message,job.fault or fault),{stage="font_apply"})
+            detail(message,job.readFault or job.fault or readFault or fault),{stage="font_apply"})
     end
+    if not native.applied then
+        if readFault or job.readFault then addon.DiagnosticAPI.Raise(readFault or job.readFault,"font_unavailable") end
+        error("font_unavailable")
+    end
+    return file.fallback
 end
-local function profile(file,size)
-    local key=file.name..":"..string.format("%.9g",size)
-    local job=profiles[key]
-    if job then
-        if job.ready and job.value.applied then readyFiles[file.path]=true end
-        return job
-    end
-    local object
-    if #order>=MAX_PROFILES then
-        for index,oldKey in ipairs(order) do
-            if profiles[oldKey].done then
-                object=profiles[oldKey].object; profiles[oldKey].cancelled=true; profiles[oldKey]=nil
-                table.remove(order,index); break
-            end
+local RETRIES={1,2,4,8}
+local function later(state,callback)
+    if state.ticket or state.attempts>=#RETRIES or type(C_Timer)~="table" or type(C_Timer.After)~="function" then return end
+    state.attempts=state.attempts+1
+    local ticket={}; state.ticket=ticket
+    C_Timer.After(RETRIES[state.attempts],function()
+        if state.ticket~=ticket then return end
+        state.ticket=nil; callback()
+    end)
+end
+local start
+start=function(file,state)
+    if state.loaded then return end
+    if state.job then state.job.cancelled=true end
+    local function observed(job)
+        if job.ready then state.loaded=true; state.ticket=nil; state.reason=nil end
+        if job.done and not state.loaded then
+            state.fallback=true
+            later(state,function() start(file,state) end)
         end
-        if not object then error("font_unavailable") end
-    end
-    object=object or invisible()
-    object:SetText(SAMPLE)
-    job=request(object,file.path,size,nil,true,function(value)
-        if value.ready and value.value.applied then readyFiles[file.path]=true end
         notify()
-    end,function(value)
-        if value.ready and value.value.applied then readyFiles[file.path]=true end
-        if not value.ready then fallback(value,file); notify() end
-    end,readyFiles[file.path])
-    if job.ready and job.value.applied then readyFiles[file.path]=true end
-    profiles[key]=job; order[#order+1]=key
-    return job
+    end
+    state.job=request(state.object,file.path,21,nil,true,observed,observed)
+    if state.job.ready then state.loaded=true; state.ticket=nil; state.reason=nil end
+end
+local function profile(file)
+    local state=profiles[file.name]
+    if not state then
+        state={object=invisible(),attempts=0}
+        profiles[file.name]=state; start(file,state)
+    end
+    return state
 end
 function Fonts.Preload()
     if preloaded then return end
     preloaded=true
-    for _,file in ipairs(files) do profile(file,21) end
+    for _,file in ipairs(files) do profile(file) end
 end
 function Fonts.Prepare(name,size)
     if not embedded[name] or not positive(size) then error("font_unavailable") end
-    return profile(embedded[name],math.max(8,size)).ready
+    local state=profile(embedded[name])
+    return state.loaded or state.fallback or false
 end
 function Fonts.Retry()
-    -- A new conversation may retry an unavailable asset; no permanent rejection cache.
-    for key,job in pairs(profiles) do
-        if job.done and (job.selected or not job.ready) then
-            job.cancelled=true; job.object:SetText(SAMPLE)
-            local file=embedded[key:match("^(.-):")]
-            profiles[key]=request(job.object,job.path,job.size,nil,true,notify,function(value)
-                if not value.ready then fallback(value,file); notify() end
-            end)
+    for name,state in pairs(profiles) do
+        if not state.loaded then
+            state.attempts=0; state.ticket=nil
+            if state.job.done then start(embedded[name],state) end
         end
+    end
+    for object,app in pairs(applications) do
+        if app.native or app.failed then app.ticket=nil; applications[object]=nil end
+    end
+end
+function Fonts.UseFallback(reason)
+    for _,file in ipairs(files) do
+        local state=profile(file)
+        if not state.loaded then state.fallback=true; state.reason=reason or "preparation_deadline" end
     end
 end
 -- The singleton renderer replaces its callback instead of accumulating listeners.
@@ -180,29 +190,40 @@ function Fonts.Apply(object,name,size)
     local file=embedded[name]
     if not file or not positive(size) then error("font_unavailable") end
     size=math.max(8,size)
-    local job=profile(file,size)
-    if not job.ready then
-        if job.done then
-            if job.readFault then addon.DiagnosticAPI.Raise(job.readFault,"font_unavailable") end
-            error("font_unavailable")
+    local state=profile(file)
+    if not state.loaded and not state.fallback then return nil,false end
+    local app=applications[object]
+    if not app or app.file~=file or app.size~=size then
+        if app then app.ticket=nil end
+        app={file=file,size=size,attempts=0}; applications[object]=app
+    end
+    local function apply()
+        local job=state.job
+        app.attemptedLoaded=state.loaded
+        if state.loaded then
+            job={object=object,path=file.path,size=size}
+            job.success,job.fault=setFont(object,file.path,size,nil)
+            job.value,job.readFault=snapshot(job)
+            if job.value.applied then
+                app.path=file.path; app.native=false; app.failed=false; app.ticket=nil
+                return
+            end
         end
-        return nil,false
+        app.native=true; app.failed=true
+        app.path=fallback(object,file,size,job,state.reason or "region_unconfirmed")
+        app.failed=false
+        if state.loaded then
+            later(app,function()
+                if applications[object]~=app then return end
+                -- Callback errors belong to the next safe layout, never the timer.
+                local ok=addon.DiagnosticAPI.Try(apply)
+                if not ok then app.failed=true; app.path=nil end
+                notify()
+            end)
+        end
     end
-    local path=job.selected or file.path
-    local applied=applications[object]
-    if not applied or applied.path~=path or applied.size~=size then
-        if applied then applied.cancelled=true end
-        applied=request(object,path,size,nil,false,notify,notify)
-        -- The sample has already settled; matching identity on this region is sufficient.
-        if applied.value.applied then applied.ready=true end
-        applications[object]=applied
-    end
-    if applied.ready then return path,true end
-    if applied.done then
-        if applied.readFault then addon.DiagnosticAPI.Raise(applied.readFault,"font_unavailable") end
-        error("font_unavailable")
-    end
-    return nil,false
+    if not app.path or app.failed or app.native and state.loaded and not app.attemptedLoaded then apply() end
+    return app.path,true
 end
 function Fonts.Test(report)
     testGeneration=testGeneration+1
